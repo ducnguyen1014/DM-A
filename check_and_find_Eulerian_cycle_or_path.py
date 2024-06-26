@@ -89,23 +89,26 @@ class Graph(object):
         self, startVertex: int, currentVertex: int, traveledEdges: list, path: list
     ):
         for nextVertex in self.graph[currentVertex]:
-            # Have not traveled
-            if (
-                nextVertex != startVertex
-                and {currentVertex, nextVertex} not in traveledEdges
-            ):
+
+            # Have traveled to all edges in the graph
+            if len(traveledEdges) == self.numberOfEdges:
+                return path
+
+            # Have not traveled through
+            if {currentVertex, nextVertex} not in traveledEdges:
                 traveledEdges.append({currentVertex, nextVertex})
                 path.append(nextVertex)
                 path = self.travelThroughEdges(
                     startVertex, nextVertex, traveledEdges, path
                 )
-
-            # In case come back to a node that has at least 4 degrees
-            elif nextVertex == startVertex and len(path) == self.numberOfEdges:
-                path.append(startVertex)
-                traveledEdges.append({currentVertex, nextVertex})
-
-            # Come back to started node
+                
+                if len(traveledEdges) == self.numberOfEdges:
+                    return path
+                else:
+                    traveledEdges.pop()
+                    path.pop()
+            
+            # Have traveled through this vertex
             else:
                 continue
 
@@ -113,8 +116,9 @@ class Graph(object):
 
     def findEulerianCycle(self):
         # Find the Eulerian cycle
+        eulerianType = self.isEulerian()
 
-        if self.isEulerian() == 2:
+        if eulerianType == 2:
             i = 0
             while len(self.graph[i]) == 0:
                 i += 1
@@ -122,7 +126,7 @@ class Graph(object):
             return self.travelThroughEdges(i, i, [], [i])
 
         # Find the Eulerian path
-        elif self.isEulerian() == 1:
+        elif eulerianType == 1:
             i = 0
             while len(self.graph[i]) % 2 != 1:
                 i += 1
@@ -145,8 +149,8 @@ def main():
 
     g2 = Graph(11)
     g2.addEdge(2, 1)  # 1
-    g2.addEdge(1, 0)  # 2
-    g2.addEdge(0, 10)  # 3
+    # g2.addEdge(1, 0)  # 2
+    # g2.addEdge(0, 10)  # 3
     g2.addEdge(10, 9)  # 4
     g2.addEdge(9, 8)  # 5
     g2.addEdge(8, 5)  # 6
@@ -154,7 +158,7 @@ def main():
     g2.addEdge(4, 3)  # 8
     g2.addEdge(3, 2)  # 9
     g2.addEdge(1, 3)  # 10
-    g2.addEdge(1, 6)  # 11
+    # g2.addEdge(1, 6)  # 11
     g2.addEdge(6, 3)  # 12
     g2.addEdge(6, 7)  # 13
     g2.addEdge(6, 5)  # 14
