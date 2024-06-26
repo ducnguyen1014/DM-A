@@ -133,6 +133,34 @@ class Graph(object):
         else:
             return []
 
+    def travelThroughVertices(self, currentVertex: int, path: list):
+        for nextVertex in self.graph[currentVertex]:
+            
+            # Hamiltonian cycle / path
+            if len(path) == self.V + 1 and path[0] == path[-1] or len(path) == self.V:
+                return path
+            
+            if nextVertex not in path:
+                path.append(nextVertex)
+                path = self.travelThroughVertices(nextVertex, path)
+                
+                # Return immediately if it is Hamiltonian cycle / path
+                if len(path) == self.V + 1 and path[0] == path[-1] or len(path) == self.V:
+                    return path
+                else:
+                    path.pop()
+
+            else:
+                continue
+                    
+        return path
+    
+    def findHamiltonianCycle(self):
+        i = 0
+        while len(self.graph[i]) == 0:
+            i += 1
+            
+        self.travelThroughVertices(i, [i])
 
 def main():
     # g1 = Graph(5)
@@ -143,27 +171,27 @@ def main():
     # print(g1.isEulerian())
     # print(g1.findEulerianCycle())
 
-    g2 = Graph(11)
-    g2.addEdge(2, 1)  # 1
-    g2.addEdge(1, 0)  # 2
-    g2.addEdge(0, 10)  # 3
-    g2.addEdge(10, 9)  # 4
-    g2.addEdge(9, 8)  # 5
-    g2.addEdge(8, 5)  # 6
-    g2.addEdge(5, 4)  # 7
-    g2.addEdge(4, 3)  # 8
-    g2.addEdge(3, 2)  # 9
-    g2.addEdge(1, 3)  # 10
-    g2.addEdge(1, 6)  # 11
-    g2.addEdge(6, 3)  # 12
-    g2.addEdge(6, 7)  # 13
-    g2.addEdge(6, 5)  # 14
-    g2.addEdge(7, 10)  # 15
-    g2.addEdge(7, 8)  # 16
-    g2.addEdge(7, 5)  # 17
-    g2.addEdge(10, 8)  # 18
-    print(g2.isEulerian())
-    print(g2.findEulerianCycle())
+    # g2 = Graph(11)
+    # g2.addEdge(2, 1)  # 1
+    # g2.addEdge(1, 0)  # 2
+    # g2.addEdge(0, 10)  # 3
+    # g2.addEdge(10, 9)  # 4
+    # g2.addEdge(9, 8)  # 5
+    # g2.addEdge(8, 5)  # 6
+    # g2.addEdge(5, 4)  # 7
+    # g2.addEdge(4, 3)  # 8
+    # g2.addEdge(3, 2)  # 9
+    # g2.addEdge(1, 3)  # 10
+    # g2.addEdge(1, 6)  # 11
+    # g2.addEdge(6, 3)  # 12
+    # g2.addEdge(6, 7)  # 13
+    # g2.addEdge(6, 5)  # 14
+    # g2.addEdge(7, 10)  # 15
+    # g2.addEdge(7, 8)  # 16
+    # g2.addEdge(7, 5)  # 17
+    # g2.addEdge(10, 8)  # 18
+    # print(g2.isEulerian())
+    # print(g2.findEulerianCycle())
 
 
 if __name__ == "__main__":
