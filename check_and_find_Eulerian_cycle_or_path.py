@@ -85,9 +85,7 @@ class Graph(object):
             elif odd > 2:
                 return 0
 
-    def travelThroughEdges(
-        self, startVertex: int, currentVertex: int, traveledEdges: list, path: list
-    ):
+    def travelThroughEdges(self, currentVertex: int, traveledEdges: list, path: list):
         for nextVertex in self.graph[currentVertex]:
 
             # Have traveled to all edges in the graph
@@ -98,16 +96,14 @@ class Graph(object):
             if {currentVertex, nextVertex} not in traveledEdges:
                 traveledEdges.append({currentVertex, nextVertex})
                 path.append(nextVertex)
-                path = self.travelThroughEdges(
-                    startVertex, nextVertex, traveledEdges, path
-                )
-                
+                path = self.travelThroughEdges(nextVertex, traveledEdges, path)
+
                 if len(traveledEdges) == self.numberOfEdges:
                     return path
                 else:
                     traveledEdges.pop()
                     path.pop()
-            
+
             # Have traveled through this vertex
             else:
                 continue
@@ -123,7 +119,7 @@ class Graph(object):
             while len(self.graph[i]) == 0:
                 i += 1
 
-            return self.travelThroughEdges(i, i, [], [i])
+            return self.travelThroughEdges(i, [], [i])
 
         # Find the Eulerian path
         elif eulerianType == 1:
@@ -156,7 +152,7 @@ def main():
     g2.addEdge(8, 5)  # 6
     g2.addEdge(5, 4)  # 7
     g2.addEdge(4, 3)  # 8
-    g2.addEdge(3, 2)  # 9 
+    g2.addEdge(3, 2)  # 9
     g2.addEdge(1, 3)  # 10
     g2.addEdge(1, 6)  # 11
     g2.addEdge(6, 3)  # 12
