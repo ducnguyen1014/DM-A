@@ -122,15 +122,15 @@ class DirectedGraph(object):
                 return 0
 
     def travelThroughEdges(self, currentVertex: int, traveledEdges: list, path: list):
-        for nextVertex in self.graph[currentVertex]:
+        for nextVertex in self.graph[currentVertex]["out"]:
 
             # Have traveled to all edges in the graph
             if len(traveledEdges) == self.numberOfEdges:
                 return path
 
             # Have not traveled through
-            if {currentVertex, nextVertex} not in traveledEdges:
-                traveledEdges.append({currentVertex, nextVertex})
+            if [currentVertex, nextVertex] not in traveledEdges:
+                traveledEdges.append([currentVertex, nextVertex])
                 path.append(nextVertex)
                 path = self.travelThroughEdges(nextVertex, traveledEdges, path)
 
@@ -170,7 +170,7 @@ class DirectedGraph(object):
 
         if eulerianType == 2:
             i = 0
-            while len(self.graph[i]) == 0:
+            while len(self.graph[i]["out"]) == 0:
                 i += 1
 
             return (2, self.travelThroughEdges(i, [], [i]))
@@ -178,7 +178,7 @@ class DirectedGraph(object):
         # Find the Eulerian path
         elif eulerianType == 1:
             i = 0
-            while len(self.graph[i]) % 2 != 1:
+            while len(self.graph[i]["out"]) - len(self.graph[i]["in"]) != 1:
                 i += 1
 
             return (1, self.travelThroughEdges(i, [], [i]))
@@ -187,23 +187,109 @@ class DirectedGraph(object):
         else:
             return (0, [])
 
+    def travelThroughVertices(self, startVertex: int, currentVertex: int, path: list):
+        for nextVertex in self.graph[currentVertex]["out"]:
+
+            # Hamiltonian circuit / path
+            if len(path) == self.V:
+                if startVertex in self.graph[currentVertex]["out"]:
+                    path.append(startVertex)
+
+                return path
+
+            if nextVertex not in path:
+                path.append(nextVertex)
+                path = self.travelThroughVertices(startVertex, nextVertex, path)
+
+                # Return immediately if it is Hamiltonian circuit / path
+                if (
+                    len(path) == self.V + 1
+                    and path[0] == path[-1]
+                    or len(path) == self.V
+                ):
+                    return path
+                else:
+                    path.pop()
+
+            else:
+                continue
+
+        return path
+
+    def findHamiltonianCircuit(self):
+        """
+        Find Hamiltonian circuit of the graph.
+
+        Hamiltonian circuit: a path that visits each and every vertex of the graph exactly once
+        and finishes at the starting vertex.
+
+        Hamiltonian path: a path that visits each and every vertex of the graph exactly once.
+
+        Returns:
+            tuple: (index, path)
+
+            index = 2 => Hamiltonian circuit
+
+            index = 1 => Hamiltonian path
+
+            index = 0 => no Hamiltonian circuit / Path
+        """
+
+        path = []
+        for vertex in range(self.V):
+            if len(self.graph[vertex]["out"]) > 0:
+                path = self.travelThroughVertices(vertex, vertex, [vertex])
+
+                # Hamiltonian circuit
+                if len(path) == self.V + 1 and path[0] == path[-1]:
+                    return (2, path)
+
+                # Hamiltonian path
+                elif len(path) == self.V:
+                    return (1, path)
+
+        # Neither the Hamiltonian circuit nor the Hamiltonian path
+        return (0, [])
+
 
 def main():
-    g1 = DirectedGraph(6)
-    g1.addEdge(0, 1)
-    g1.addEdge(0, 3)
-    g1.addEdge(1, 2)
-    g1.addEdge(2, 0)
-    g1.addEdge(2, 3)
-    g1.addEdge(3, 4)
-    g1.addEdge(3, 5)
-    g1.addEdge(4, 2)
-    g1.addEdge(5, 0)
-    # print(g1.isEulerian())
-    print("Find Eulerian circuit")
-    print(g1.findEulerianCircuit())
+    # g1 = DirectedGraph(6)
+    # g1.addEdge(0, 1)
+    # g1.addEdge(0, 3)
+    # g1.addEdge(1, 2)
+    # g1.addEdge(2, 0)
+    # g1.addEdge(2, 3)
+    # g1.addEdge(3, 4)
+    # g1.addEdge(3, 5)
+    # g1.addEdge(4, 2)
+    # g1.addEdge(5, 0)
+    # # print(g1.isEulerian())
+    # print("Find Eulerian circuit")
+    # print(g1.findEulerianCircuit())
     # print("Find Hamiltonian circuit")
     # print(g1.findHamiltonianCircuit())
+
+    g2 = DirectedGraph(8)
+    g2.addEdge(0, 1)
+    g2.addEdge(0, 4)
+    g2.addEdge(1, 0)
+    g2.addEdge(1, 2)
+    g2.addEdge(2, 3)
+    g2.addEdge(2, 5)
+    g2.addEdge(3, 4)
+    g2.addEdge(3, 6)
+    g2.addEdge(4, 5)
+    g2.addEdge(4, 7)
+    g2.addEdge(5, 1)
+    g2.addEdge(5, 6)
+    g2.addEdge(6, 2)
+    g2.addEdge(6, 7)
+    g2.addEdge(7, 3)
+    # g2.addEdge(7, 0)
+    print("Find Eulerian circuit")
+    print(g2.findEulerianCircuit())
+    print("Find Hamiltonian circuit")
+    print(g2.findHamiltonianCircuit())
 
 
 if __name__ == "__main__":
