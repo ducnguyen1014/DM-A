@@ -1,13 +1,14 @@
+from collections import deque
+
 class BinaryNode:
-
+    
     def __init__(self, value):
-        assert value != None, "Value must not be None!"
-
+        assert value is not None, "Value must not be None!"
+        
         self.value = value
         self.left = None
         self.right = None
         self.parent = None
-
 
 class BinarySearchTree:
 
@@ -27,30 +28,30 @@ class BinarySearchTree:
         else:
             return self._find(current.right, value)
 
-    def insertMutiple(self, values: list):
+    def insert_multiple(self, values: list):
         for value in values:
             self.insert(value)
 
     def insert(self, value):
-        newNode = BinaryNode(value)
+        new_node = BinaryNode(value)
         if self.root is None:
-            self.root = newNode
+            self.root = new_node
         else:
-            self._insert(self.root, newNode)
+            self._insert(self.root, new_node)
 
-    def _insert(self, currentNode: BinaryNode, newNode: BinaryNode):
-        if newNode.value < currentNode.value:
-            if currentNode.left is None:
-                currentNode.left = newNode
-                newNode.parent = currentNode
+    def _insert(self, current_node: BinaryNode, new_node: BinaryNode):
+        if new_node.value < current_node.value:
+            if current_node.left is None:
+                current_node.left = new_node
+                new_node.parent = current_node
             else:
-                self._insert(currentNode.left, newNode)
+                self._insert(current_node.left, new_node)
         else:
-            if currentNode.right is None:
-                currentNode.right = newNode
-                newNode.parent = currentNode
+            if current_node.right is None:
+                current_node.right = new_node
+                new_node.parent = current_node
             else:
-                self._insert(currentNode.right, newNode)
+                self._insert(current_node.right, new_node)
 
     def _delete(self, node):
         # Case 1: Node has no children
@@ -84,9 +85,52 @@ class BinarySearchTree:
             node.value = successor.value
             self._delete(successor)
 
+    def _find_min(self, node):
+        current = node
+        while current.left is not None:
+            current = current.left
+        return current
+
+    def print_tree(self):
+        self._print_tree(self.root)
+
+    def _print_tree(self, node):
+        if node is not None:
+            self._print_tree(node.left)
+            print(node.value, end=" ")
+            self._print_tree(node.right)
+
+    def print_level_order(self):
+        if not self.root:
+            return
+
+        queue = deque([self.root])
+        
+        while queue:
+            current = queue.popleft()
+            if current:
+                print(current.value, end=" ")
+                queue.append(current.left)
+                queue.append(current.right)
+            else:
+                print("None", end=" ")
+
+        print()
 
 def main():
     bst1 = BinarySearchTree()
-    bst1.insert(10)
-    bst1.insert(20)
 
+    # Insert multiple values to create a 3-stage tree with some null nodes
+    values = [15, 10, 20, None, 12, 17, None]
+    for value in values:
+        if value is not None:
+            bst1.insert(value)
+
+    # Print the tree in level order
+    print("Level-order traversal of the tree:")
+    bst1.print_level_order()
+    
+    bst1.de
+
+if __name__ == "__main__":
+    main()
