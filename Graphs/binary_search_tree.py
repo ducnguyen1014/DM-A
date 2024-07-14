@@ -35,26 +35,28 @@ class BinarySearchTree:
         if self.root is None:
             self.root = newNode
         else:
-            self._insert(self.root, newNode)
+            self.__insert(self.root, newNode)
 
     def insertMultiple(self, values: list):
         for value in values:
             self.insert(value)
 
     # Private insert method
-    def _insert(self, currentNode: BinaryNode, newNode: BinaryNode):
+    def __insert(self, currentNode: BinaryNode, newNode: BinaryNode):
         if newNode.value < currentNode.value:
             if currentNode.left is None:
                 currentNode.left = newNode
                 newNode.parent = currentNode
             else:
-                self._insert(currentNode.left, newNode)
-        else:
+                self.__insert(currentNode.left, newNode)
+        elif newNode.value > currentNode.value:
             if currentNode.right is None:
                 currentNode.right = newNode
                 newNode.parent = currentNode
             else:
-                self._insert(currentNode.right, newNode)
+                self.__insert(currentNode.right, newNode)
+        else:
+            return
 
     # Public delete method
     def delete(self, value):
