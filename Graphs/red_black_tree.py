@@ -10,8 +10,8 @@ class Strategy(Enum):
 
 
 class Color(Enum):
-    RED = 0
-    BLACK = 1
+    RED = "R"
+    BLACK = "B"
 
 
 class BinaryNode:
@@ -54,8 +54,10 @@ class RedBlackTree:
         newNode = BinaryNode(value)
         if self.root is None:
             self.root = newNode
+            self.root.color = Color.BLACK
         else:
             self.__insert(self.root, newNode)
+        self.__balanceTree(newNode)
 
     def insertMultiple(self, values: list):
         for value in values:
@@ -80,42 +82,40 @@ class RedBlackTree:
 
     # Public delete method
     def delete(self, value):
-        if self.root is None:
-            return
-
         nodeToDelete = self.__find(self.root, value)
         if nodeToDelete:
             self.__delete(nodeToDelete)
 
     # Private delete method
-    def __delete(self, node):
-        # Case 1: Node has no children
-        if node.left is None and node.right is None:
-            if node.parent is None:
-                self.root = None
+    def __delete(self, currentNode: BinaryNode):
+        # Case 1: current node has 2 children
+        if currentNode.left and currentNode.right:
+            successor = self.__findMin(currentNode.right)
+            currentNode.value = successor.value
+            currentNode = successor
+
+        # Case 2: current node has only 1 child
+        replacement = currentNode.left if currentNode.left else currentNode.right
+
+        if replacement:
+            replacement.parent = node.parent
+            if not node.parent:
+                self.root = replacement
             elif node == node.parent.left:
+                node.parent.left = replacement
+            else:
+                node.parent.right = replacement
+            node.left = node.right = node.parent = None
+
+        elif not node.parent:
+            self.root = None
+
+        else:
+            if node == node.parent.left:
                 node.parent.left = None
             else:
                 node.parent.right = None
-
-        # Case 2: Node has one child
-        elif node.left is None or node.right is None:
-            child = node.left if node.left else node.right
-
-            if node.parent is None:
-                self.root = child
-            elif node == node.parent.left:
-                node.parent.left = child
-            else:
-                node.parent.right = child
-
-            child.parent = node.parent
-
-        # Case 3: Node has two children
-        else:
-            successor = self.__findMin(node.right)
-            node.value = successor.value
-            self.__delete(successor)
+            node.parent = None
 
     def __findMin(self, node):
         current = node
@@ -136,7 +136,7 @@ class RedBlackTree:
         if index:
             node_repr = "{}{}{}".format(curr_index, delimiter, root.value)
         else:
-            node_repr = str(root.value)
+            node_repr = "{} ({})".format(str(root.value), str(root.color.value))
 
         new_root_width = gap_size = len(node_repr)
 
@@ -375,33 +375,51 @@ class RedBlackTree:
 
             # RED UNCLE
             if currentStrategy == Strategy.RED_UNCLE:
-                pass
+                currentNode.parent.parent.left.reColor()
+                currentNode.parent.parent.right.reColor()
+
+                if currentNode.parent.parent != self.root:
+                    currentNode.parent.parent.reColor()
+
+                currentNode = currentNode.parent.parent
 
             # LEFT TRIANGLE
             elif currentStrategy == Strategy.LEFT_TRIANGLE:
-                pass
+                currentNode = currentNode.parent
+                currentNode = self.__rotateLeft(currentNode)
 
             # RIGHT TRIANGLE
             elif currentStrategy == Strategy.RIGHT_TRIANGLE:
-                pass
+                currentNode = currentNode.parent
+                currentNode = self.__rotateRight(currentNode)
 
             # LEFT LINE
             elif currentStrategy == Strategy.LEFT_LINE:
-                pass
+                currentNode = currentNode.parent.parent
+                currentNode = self.__rotateRight(currentNode)
+                currentNode.reColor()
+                currentNode.parent.reColor()
 
             # RIGHT LINE
             elif currentStrategy == Strategy.RIGHT_LINE:
-                pass
+                currentNode = currentNode.parent.parent
+                currentNode = self.__rotateLeft(currentNode)
+                currentNode.reColor()
+                currentNode.parent.reColor()
 
 
 def main():
     bst1 = RedBlackTree()
 
     # Insert multiple values to create a 3-stage tree with some null nodes
-    values = [5, 2, 10, 8, 6, 9, 12]
+    values = [11, 15, 5, 18, 21, 24, 27, 29]
     for value in values:
         if value is not None:
             bst1.insert(value)
+
+    bst1.printTree()
+
+    bst1.delete(24)
 
     bst1.printTree()
 
