@@ -90,32 +90,14 @@ class RedBlackTree:
     def __delete(self, currentNode: BinaryNode):
         # Case 1: current node has 2 children
         if currentNode.left and currentNode.right:
-            successor = self.__findMin(currentNode.right)
-            currentNode.value = successor.value
-            currentNode = successor
+            successorNode = self.__findMin(currentNode.right)
+            currentNode.value = successorNode.value
+            currentNode = successorNode
+            self.__transplant(successorNode)
 
-        # Case 2: current node has only 1 child
-        replacement = currentNode.left if currentNode.left else currentNode.right
-
-        if replacement:
-            replacement.parent = node.parent
-            if not node.parent:
-                self.root = replacement
-            elif node == node.parent.left:
-                node.parent.left = replacement
-            else:
-                node.parent.right = replacement
-            node.left = node.right = node.parent = None
-
-        elif not node.parent:
-            self.root = None
-
+        # Case 2: current node has 0 or 1 child
         else:
-            if node == node.parent.left:
-                node.parent.left = None
-            else:
-                node.parent.right = None
-            node.parent = None
+            self.__transplant(currentNode)
 
     def __findMin(self, node):
         current = node
@@ -311,6 +293,49 @@ class RedBlackTree:
             self.root = upNode
 
         return downNode
+
+    # Plug single child to parent of the current node, delete current node
+    def __transplant(self, currentNode: BinaryNode):
+        # Case 1: Current node is the only node of the tree
+        if not currentNode.parent and not currentNode.left and not currentNode.right:
+            self.root = None
+
+        # Case 2: Current node is a leaf node
+        if currentNode.left and currentNode.right:
+            # Left leaf node
+            if currentNode.parent.left == currentNode:
+                # If the current node is red, just delete
+                currentNode.parent.left = None
+
+                # If the current node is black => Balance
+                if currentNode.color == Color.BLACK:
+                    currentNode = self.__rotateLeft(currentNode.parent)
+                    if currentNode.right:
+                        self.__balanceTree(currentNode.right)
+
+            # Rigth leaf node
+            if currentNode.parent.right == currentNode:
+                # If the current node is red, just delete
+                currentNode.parent.right = None
+
+                # If the current node is black => Balance
+                currentNode = self.__rotateRight(currentNode.parent)
+                if currentNode.left:
+                    self.__balanceTree(currentNode.left)
+
+        # Case 3: Current node has 1 child
+        replacementNode = currentNode.left if currentNode.left else currentNode.right
+
+        if not currentNode.parent:
+            self.root = replacementNode
+        elif currentNode.parent.left == currentNode:
+            currentNode.parent.left = replacementNode
+        else:
+            currentNode.parent.right = replacementNode
+
+        if replacementNode:
+            replacementNode.parent = currentNode.parent
+            replacementNode.color = Color.BLACK
 
     def __getStrategy(self, currentNode: BinaryNode):
         # Not valid
