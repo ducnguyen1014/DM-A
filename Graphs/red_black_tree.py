@@ -90,9 +90,8 @@ class RedBlackTree:
     def __delete(self, currentNode: BinaryNode):
         # Case 1: current node has 2 children
         if currentNode.left and currentNode.right:
-            successorNode = self.__findMin(currentNode.right)
+            successorNode = self.__findMax(currentNode.left)
             currentNode.value = successorNode.value
-            currentNode = successorNode
             self.__transplant(successorNode)
 
         # Case 2: current node has 0 or 1 child
@@ -103,6 +102,12 @@ class RedBlackTree:
         current = node
         while current.left is not None:
             current = current.left
+        return current
+
+    def __findMax(self, node):
+        current = node
+        while current.right is not None:
+            current = current.right
         return current
 
     def printTree(self):
@@ -301,41 +306,55 @@ class RedBlackTree:
             self.root = None
 
         # Case 2: Current node is a leaf node
-        if currentNode.left and currentNode.right:
+        if not currentNode.left and not currentNode.right:
             # Left leaf node
             if currentNode.parent.left == currentNode:
+                currentNode = currentNode.parent
+
                 # If the current node is red, just delete
-                currentNode.parent.left = None
+                if currentNode.left.color == Color.RED:
+                    currentNode.left = None
 
                 # If the current node is black => Balance
-                if currentNode.color == Color.BLACK:
-                    currentNode = self.__rotateLeft(currentNode.parent)
+                elif currentNode.left.color == Color.BLACK:
+                    currentNode.left = None
                     if currentNode.right:
-                        self.__balanceTree(currentNode.right)
+                        self.__rotateLeft(currentNode)
+
+                return
 
             # Rigth leaf node
             if currentNode.parent.right == currentNode:
-                # If the current node is red, just delete
-                currentNode.parent.right = None
+                currentNode = currentNode.parent
 
-                # If the current node is black => Balance
-                currentNode = self.__rotateRight(currentNode.parent)
-                if currentNode.left:
-                    self.__balanceTree(currentNode.left)
+                # If the current node is red, just delete
+                if currentNode.right.color == Color.RED:
+                    currentNode.right = None
+
+                # If the current node is bla ck => Balance
+                elif currentNode.right.color == Color.BLACK:
+                    currentNode.right = None
+                    if currentNode.left:
+                        self.__rotateRight(currentNode)
+
+                return
 
         # Case 3: Current node has 1 child
-        replacementNode = currentNode.left if currentNode.left else currentNode.right
+        if currentNode.left or currentNode.right:
+            replacementNode = (
+                currentNode.left if currentNode.left else currentNode.right
+            )
 
-        if not currentNode.parent:
-            self.root = replacementNode
-        elif currentNode.parent.left == currentNode:
-            currentNode.parent.left = replacementNode
-        else:
-            currentNode.parent.right = replacementNode
+            if not currentNode.parent:
+                self.root = replacementNode
+            elif currentNode.parent.left == currentNode:
+                currentNode.parent.left = replacementNode
+            else:
+                currentNode.parent.right = replacementNode
 
-        if replacementNode:
-            replacementNode.parent = currentNode.parent
-            replacementNode.color = Color.BLACK
+            if replacementNode:
+                replacementNode.parent = currentNode.parent
+                replacementNode.color = Color.BLACK
 
     def __getStrategy(self, currentNode: BinaryNode):
         # Not valid
@@ -398,6 +417,8 @@ class RedBlackTree:
             # Get strategy
             currentStrategy = self.__getStrategy(currentNode)
 
+            print(currentStrategy)
+
             # RED UNCLE
             if currentStrategy == Strategy.RED_UNCLE:
                 currentNode.parent.parent.left.reColor()
@@ -437,7 +458,8 @@ def main():
     bst1 = RedBlackTree()
 
     # Insert multiple values to create a 3-stage tree with some null nodes
-    values = [11, 15, 5, 18, 21, 24, 27, 29]
+    # values = [11, 15, 5, 18, 21, 24, 27, 29]
+    values = [11, 15, 5, 18, 21, 24, 27, 29, 20, 22]
     for value in values:
         if value is not None:
             bst1.insert(value)
