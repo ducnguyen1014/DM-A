@@ -111,20 +111,23 @@ class Coordinates:
         self,
         latitude: float,
         longitude: float,
-        name: str = None,
+        name: str,
         marker: str = None,
         marker_size: int = 100,
         marker_color: str = None,
     ):
         self.latitude = float(latitude)
         self.longitude = float(longitude)
-        self.name = name
+        self.name = name  # unique identifier
         self.marker = marker
         self.marker_size = marker_size
         self.marker_color = marker_color
 
     def __repr__(self):
         return f"Coordinates(latitude={self.latitude}, longitude={self.longitude})"
+
+    def get_name(self):
+        return self.name
 
 
 class Depot(Coordinates):
@@ -240,19 +243,33 @@ class MapGraph:
             return True
         return False
 
-    def add_road(self, start: Coordinates, end: Coordinates):
+    def add_road(self, start_name: str, end_name: str):
+        """
+        Add new road according to coordinates' names
+        """
+
         # Check wether the coordinates exist in the graph
-        new_road = Road(start, end)
-        if self.road_exists(new_road):
-            return
+        coordinates_with_start_name = [
+            coord for coord in self.coordinate_list if coord.get_name() == start_name
+        ]
 
-        self.road_list.append(new_road)
-        self.add_location(start)
-        self.add_location(end)
+        coordinates_with_end_name = [
+            coord for coord in self.coordinate_list if coord.get_name() == end_name
+        ]
 
-        # Add the road (edge) in both directions (undirected graph)
-        self.graph[start].append((end, new_road.get_distance()))
-        self.graph[end].append((start, new_road.get_distance()))
+        for start in coordinates_with_start_name:
+            for end in coordinates_with_end_name:
+                new_road = Road(start, end)
+                if self.road_exists(new_road):
+                    return
+
+                self.road_list.append(new_road)
+                self.add_location(start)
+                self.add_location(end)
+
+                # Add the road (edge) in both directions (undirected graph)
+                self.graph[start].append((end, new_road.get_distance()))
+                self.graph[end].append((start, new_road.get_distance()))
 
     def compose_visualization_coordinates(self):
         """
@@ -373,6 +390,7 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
                 self.map_graph.add_location(customer)
 
         # Add roads
+        self.map_graph.add_road("Depot", "NDP_Customer_1")
 
     def visualize(self, enable_coordinates: bool = True, enable_roads: bool = True):
         plt.figure(figsize=FIG_SIZE)
