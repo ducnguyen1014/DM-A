@@ -50,7 +50,7 @@ random.seed(50)
 ENABLE_COORDINATES = True
 ENABLE_ROADS = True
 ENABLE_NDP_CUSTOMERS = True
-ENABLE_HDP_CUSTOMERS = False
+ENABLE_HDP_CUSTOMERS = True
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
 
@@ -94,8 +94,8 @@ DEFAULT_STYLE_OF_ROAD = "-"
 
 # Map
 RANGE_OF_MAP = (
-    (0, 200),
-    (0, 100),
+    (0, 220),
+    (-20, 120),
 )  # 2D map, ((xlim), (ylim)), for example: ((0, 100), (0, 100))
 
 
@@ -408,28 +408,44 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         # Add Depot - NDP Customer roads
         if ENABLE_NDP_CUSTOMERS:
             self.map_graph.add_road("Depot", "NDP_1")
-            self.map_graph.add_road("Depot", "NDP_2")
             self.map_graph.add_road("Depot", "NDP_3")
-            self.map_graph.add_road("Depot", "NDP_4")
 
             self.map_graph.add_road("NDP_1", "NDP_2")
             self.map_graph.add_road("NDP_1", "NDP_4")
             self.map_graph.add_road("NDP_1", "NDP_5")
 
-            self.map_graph.add_road("NDP_2", "NDP_3")
             self.map_graph.add_road("NDP_2", "NDP_5")
-
-            self.map_graph.add_road("NDP_3", "NDP_4")
 
             self.map_graph.add_road("NDP_4", "NDP_5")
 
         # Add Depot - HDP Customer roads
         if ENABLE_HDP_CUSTOMERS:
-            pass
+            self.map_graph.add_road("Depot", "HDP_4")
+            self.map_graph.add_road("Depot", "HDP_5")
+
+            self.map_graph.add_road("HDP_1", "HDP_3")
+            self.map_graph.add_road("HDP_1", "HDP_4")
+
+            self.map_graph.add_road("HDP_2", "HDP_5")
 
         # Add NDP Customer - HDP Customer roads
         if ENABLE_NDP_CUSTOMERS and ENABLE_HDP_CUSTOMERS:
-            pass
+            self.map_graph.add_road("NDP_1", "HDP_4")
+            self.map_graph.add_road("NDP_1", "HDP_5")
+
+            self.map_graph.add_road("NDP_2", "HDP_2")
+            self.map_graph.add_road("NDP_2", "HDP_5")
+
+            self.map_graph.add_road("NDP_3", "HDP_1")
+            self.map_graph.add_road("NDP_3", "HDP_2")
+            self.map_graph.add_road("NDP_3", "HDP_3")
+            self.map_graph.add_road("NDP_3", "HDP_4")
+            self.map_graph.add_road("NDP_3", "HDP_5")
+
+            self.map_graph.add_road("NDP_4", "HDP_1")
+            self.map_graph.add_road("NDP_4", "HDP_4")
+
+            self.map_graph.add_road("NDP_5", "HDP_2")
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
