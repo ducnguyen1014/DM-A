@@ -50,7 +50,7 @@ random.seed(50)
 ENABLE_COORDINATES = True
 ENABLE_ROADS = True
 ENABLE_NDP_CUSTOMERS = True
-ENABLE_HDP_CUSTOMERS = True
+ENABLE_HDP_CUSTOMERS = False
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
 
@@ -63,7 +63,7 @@ DEFAULT_MARKER_SIZE_OF_DEPOT = 100
 
 
 # NDP customers
-NDP_CUSTOMER_NAME = "NDP_Customer"
+NDP_CUSTOMER_NAME = "NDP"
 NUMBER_OF_NDP_CUSTOMER = 5
 RANGE_OF_NDP_CUSTOMER = (
     (0, 200),
@@ -75,7 +75,7 @@ DEFAULT_MARKER_SIZE_OF_NDP_CUSTOMER = 100
 
 
 # HDP customers
-HDP_CUSTOMER_NAME = "HDP_Customer"
+HDP_CUSTOMER_NAME = "HDP"
 NUMBER_OF_HDP_CUSTOMER = 5
 RANGE_OF_HDP_CUSTOMER = (
     (0, 200),
@@ -211,10 +211,20 @@ class HDP_Customer(Customer):
 
 
 class Road:
-    def __init__(self, start: Coordinates, end: Coordinates):
+    def __init__(
+        self,
+        start: Coordinates,
+        end: Coordinates,
+        style: str = DEFAULT_STYLE_OF_ROAD,
+        width: int = DEFAULT_WIDTH_OF_ROAD,
+        color: str = DEFAULT_COLOR_OF_ROAD,
+    ):
         self.start = start
         self.end = end
         self.distance = self.calculate_distance()
+        self.style = style
+        self.width = width
+        self.color = color
 
     def calculate_distance(self):
         coord1 = np.array([self.start.latitude, self.start.longitude])
@@ -234,6 +244,9 @@ class MapGraph:
         self.unique_label: list[str] = []
 
     def add_location(self, location: Coordinates):
+        if not ENABLE_COORDINATES:
+            return
+
         if location not in self.coordinate_list:
             self.coordinate_list.append(location)
             self.graph[location] = []
@@ -247,6 +260,9 @@ class MapGraph:
         """
         Add new road according to coordinates' names
         """
+
+        if not ENABLE_ROADS:
+            return
 
         # Check wether the coordinates exist in the graph
         coordinates_with_start_name = [
@@ -309,9 +325,9 @@ class MapGraph:
             plt.plot(
                 [road.start.latitude, road.end.latitude],
                 [road.start.longitude, road.end.longitude],
-                color=DEFAULT_COLOR_OF_ROAD,
-                linestyle=DEFAULT_STYLE_OF_ROAD,
-                linewidth=DEFAULT_WIDTH_OF_ROAD,
+                color=road.color,
+                linestyle=road.style,
+                linewidth=road.width,
                 label="Road" if "Road" not in self.unique_label else "",
             )
             self.unique_label.append("Road")
@@ -389,26 +405,44 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             for customer in self.hdp_customer_list:
                 self.map_graph.add_location(customer)
 
-        # Add roads
-        self.map_graph.add_road("Depot", "NDP_Customer_1")
+        # Add Depot - NDP Customer roads
+        if ENABLE_NDP_CUSTOMERS:
+            self.map_graph.add_road("Depot", "NDP_1")
+            self.map_graph.add_road("Depot", "NDP_2")
+            self.map_graph.add_road("Depot", "NDP_3")
+            self.map_graph.add_road("Depot", "NDP_4")
 
-    def visualize(self, enable_coordinates: bool = True, enable_roads: bool = True):
+            self.map_graph.add_road("NDP_1", "NDP_2")
+            self.map_graph.add_road("NDP_1", "NDP_4")
+            self.map_graph.add_road("NDP_1", "NDP_5")
+
+            self.map_graph.add_road("NDP_2", "NDP_3")
+            self.map_graph.add_road("NDP_2", "NDP_5")
+
+            self.map_graph.add_road("NDP_3", "NDP_4")
+
+            self.map_graph.add_road("NDP_4", "NDP_5")
+
+        # Add Depot - HDP Customer roads
+        if ENABLE_HDP_CUSTOMERS:
+            pass
+
+        # Add NDP Customer - HDP Customer roads
+        if ENABLE_NDP_CUSTOMERS and ENABLE_HDP_CUSTOMERS:
+            pass
+
+    def visualize(self):
         plt.figure(figsize=FIG_SIZE)
 
-        if not enable_coordinates and not enable_roads:
-            raise Warning("Please enable at least one option to visualize")
-        if enable_coordinates:
-            self.map_graph.compose_visualization_coordinates()
-        if enable_roads:
-            self.map_graph.compose_visualization_roads()
-
+        self.map_graph.compose_visualization_coordinates()
+        self.map_graph.compose_visualization_roads()
         self.map_graph.visualize()
 
 
 def main():
     problem = MultiObjectiveVehicleRoutingProblem()
 
-    problem.visualize(ENABLE_COORDINATES, ENABLE_ROADS)
+    problem.visualize()
 
 
 if __name__ == "__main__":
