@@ -43,14 +43,17 @@ import random
 # Dash-dot line:  '-.'
 
 # Random
-random.seed(50)
+SEED = 30
+random.seed(SEED)
 
 
 # Plot settings
 ENABLE_COORDINATES = True
 ENABLE_ROADS = True
 ENABLE_NDP_CUSTOMERS = True
-ENABLE_HDP_CUSTOMERS = True
+ENABLE_HDP_CUSTOMERS = False
+
+ENABLE_GRID = False
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
 
@@ -335,11 +338,14 @@ class MapGraph:
     def visualize(self):
         plt.xlabel("Latitude")
         plt.ylabel("Longitude")
-        plt.title("Map Graph Visualization")
+        plt.title(f"Map Graph Visualization - Map: {SEED}")
         plt.legend(loc="upper left")
         plt.xlim(RANGE_OF_MAP[0])
         plt.ylim(RANGE_OF_MAP[1])
-        plt.grid(True)
+
+        if ENABLE_GRID:
+            plt.grid(True)
+
         # plt.tight_layout()
         plt.show()
 
@@ -350,6 +356,9 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         self.ndp_customer_list: list[NDP_Customer] = []
         self.hdp_customer_list: list[HDP_Customer] = []
 
+        self.define_map()
+
+    def define_map(self):
         # Add NDP locations
         for i in range(NUMBER_OF_NDP_CUSTOMER):
             self.ndp_customer_list.append(
@@ -408,44 +417,41 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         # Add Depot - NDP Customer roads
         if ENABLE_NDP_CUSTOMERS:
             self.map_graph.add_road("Depot", "NDP_1")
+            self.map_graph.add_road("Depot", "NDP_2")
             self.map_graph.add_road("Depot", "NDP_3")
+            self.map_graph.add_road("Depot", "NDP_4")
+            self.map_graph.add_road("Depot", "NDP_5")
 
-            self.map_graph.add_road("NDP_1", "NDP_2")
-            self.map_graph.add_road("NDP_1", "NDP_4")
+            self.map_graph.add_road("NDP_1", "NDP_3")
             self.map_graph.add_road("NDP_1", "NDP_5")
 
-            self.map_graph.add_road("NDP_2", "NDP_5")
-
-            self.map_graph.add_road("NDP_4", "NDP_5")
+            self.map_graph.add_road("NDP_2", "NDP_3")
+            self.map_graph.add_road("NDP_2", "NDP_4")
 
         # Add Depot - HDP Customer roads
         if ENABLE_HDP_CUSTOMERS:
-            self.map_graph.add_road("Depot", "HDP_4")
             self.map_graph.add_road("Depot", "HDP_5")
 
-            self.map_graph.add_road("HDP_1", "HDP_3")
             self.map_graph.add_road("HDP_1", "HDP_4")
+            self.map_graph.add_road("HDP_1", "HDP_5")
 
-            self.map_graph.add_road("HDP_2", "HDP_5")
+            self.map_graph.add_road("HDP_3", "HDP_4")
+
+            self.map_graph.add_road("HDP_4", "HDP_5")
 
         # Add NDP Customer - HDP Customer roads
         if ENABLE_NDP_CUSTOMERS and ENABLE_HDP_CUSTOMERS:
-            self.map_graph.add_road("NDP_1", "HDP_4")
-            self.map_graph.add_road("NDP_1", "HDP_5")
+            self.map_graph.add_road("NDP_1", "HDP_2")
 
-            self.map_graph.add_road("NDP_2", "HDP_2")
-            self.map_graph.add_road("NDP_2", "HDP_5")
+            self.map_graph.add_road("NDP_2", "HDP_3")
 
-            self.map_graph.add_road("NDP_3", "HDP_1")
             self.map_graph.add_road("NDP_3", "HDP_2")
-            self.map_graph.add_road("NDP_3", "HDP_3")
-            self.map_graph.add_road("NDP_3", "HDP_4")
-            self.map_graph.add_road("NDP_3", "HDP_5")
 
-            self.map_graph.add_road("NDP_4", "HDP_1")
+            self.map_graph.add_road("NDP_4", "HDP_3")
             self.map_graph.add_road("NDP_4", "HDP_4")
+            self.map_graph.add_road("NDP_4", "HDP_5")
 
-            self.map_graph.add_road("NDP_5", "HDP_2")
+            self.map_graph.add_road("NDP_5", "HDP_5")
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
