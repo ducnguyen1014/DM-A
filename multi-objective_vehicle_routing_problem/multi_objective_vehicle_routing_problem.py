@@ -47,6 +47,8 @@ random.seed(50)
 
 
 # Plot settings
+ENABLE_COORDINATES = True
+ENABLE_ROADS = True
 ENABLE_NDP_CUSTOMERS = True
 ENABLE_HDP_CUSTOMERS = True
 ENABLE_POINT_LABEL = True
@@ -84,14 +86,18 @@ DEFAULT_MARKER_OF_HDP_CUSTOMER = "^"
 DEFAULT_MARKER_SIZE_OF_HDP_CUSTOMER = 100
 
 
+# Road
+DEFAULT_COLOR_OF_ROAD = "black"
+DEFAULT_WIDTH_OF_ROAD = 1
+DEFAULT_STYLE_OF_ROAD = "-"
+
+
 # Map
 RANGE_OF_MAP = (
     (0, 200),
     (0, 100),
 )  # 2D map, ((xlim), (ylim)), for example: ((0, 100), (0, 100))
-DEFAULT_COLOR_OF_ROAD = "black"
-DEFAULT_WIDTH_OF_ROAD = 2
-DEFAULT_STYLE_OF_ROAD = ""
+
 
 # Transportation
 NUMBER_OF_VEHICLE = 1
@@ -209,7 +215,7 @@ class Road:
 
     def calculate_distance(self):
         coord1 = np.array([self.start.latitude, self.start.longitude])
-        coord2 = np.array([self.start.latitude, self.start.longitude])
+        coord2 = np.array([self.end.latitude, self.end.longitude])
 
         return np.linalg.norm(coord1 - coord2)
 
@@ -220,86 +226,42 @@ class Road:
 class MapGraph:
     def __init__(self):
         self.coordinate_list: List[Coordinates] = []
-        self.road_list: List[Tuple[Coordinates, Coordinates, float]] = []
+        self.road_list: List[Road] = []
         self.graph = defaultdict(list)
+        self.unique_label: list[str] = []
 
     def add_location(self, location: Coordinates):
         if location not in self.coordinate_list:
             self.coordinate_list.append(location)
             self.graph[location] = []
 
-    def road_exists(self, start: Coordinates, end: Coordinates):
-        for neighbor, _ in self.graph[start]:
-            if neighbor == end:
-                return True
+    def road_exists(self, new_road: Road):
+        if new_road in self.road_list:
+            return True
         return False
 
     def add_road(self, start: Coordinates, end: Coordinates):
         # Check wether the coordinates exist in the graph
-        if start not in self.graph:
-            self.add_location(start)
-        if end not in self.graph:
-            self.add_location(end)
+        new_road = Road(start, end)
+        if self.road_exists(new_road):
+            return
 
-        if not self.road_exists(start, end) and not self.road_exists(end, start):
-            distance = start.flat_distance_to(end)
-            self.graph[start].append((end, distance))
-            self.graph[end].append((start, distance))
-            # Add the road to the roads list
-            self.roads.append((start, end, distance))
-        else:
-            raise ValueError(f"Road between {start} and {end} already exists")
+        self.road_list.append(new_road)
+        self.add_location(start)
+        self.add_location(end)
 
-    def remove_road(self, start: Coordinates, end: Coordinates):
-        """
-        Remove the road (edge) between two coordinates if it exists.
-        """
-        # Remove end from start's neighbors
-        self.graph[start] = [
-            (neighbor, dist) for neighbor, dist in self.graph[start] if neighbor != end
-        ]
-
-        # Remove start from end's neighbors
-        self.graph[end] = [
-            (neighbor, dist) for neighbor, dist in self.graph[end] if neighbor != start
-        ]
-
-        # Remove the road from the roads list
-        self.roads = [
-            (s, e, d)
-            for s, e, d in self.roads
-            if not ((s == start and e == end) or (s == end and e == start))
-        ]
-
-    def add_all_roads(self):
-        """
-        Adds roads between all pairs of points in the graph if a road doesn't already exist.
-        """
-        locations = list(self.graph.keys())
-
-        for i in range(len(locations)):
-            for j in range(i + 1, len(locations)):
-                start, end = locations[i], locations[j]
-
-                # Add a road if one does not already exist
-                if not self.road_exists(start, end):
-                    self.add_road(start, end)
+        # Add the road (edge) in both directions (undirected graph)
+        self.graph[start].append((end, new_road.get_distance()))
+        self.graph[end].append((start, new_road.get_distance()))
 
     def compose_visualization_coordinates(self):
         """
         Visualize the graph with coordinates as points.
         """
 
-        unique_label: list[str] = []
-
         for coordinate in self.coordinate_list:
             # Plot all coordinates
-
-            if not ENABLE_NDP_CUSTOMERS and coordinate.name == NDP_CUSTOMER_NAME:
-                continue
-
-            if not ENABLE_HDP_CUSTOMERS and coordinate.name == HDP_CUSTOMER_NAME:
-                continue
+            label = coordinate.name.rsplit("_", 1)[0]
 
             plt.scatter(
                 coordinate.latitude,
@@ -307,7 +269,7 @@ class MapGraph:
                 color=coordinate.marker_color,
                 marker=coordinate.marker,
                 s=coordinate.marker_size,
-                label=coordinate.name if coordinate.name not in unique_label else "",
+                label=(label if label not in self.unique_label else ""),
             )
 
             if ENABLE_POINT_LABEL:
@@ -318,7 +280,24 @@ class MapGraph:
                     fontsize=9,
                 )
 
-            unique_label.append(coordinate.name)
+            self.unique_label.append(label)
+
+    def compose_visualization_roads(self):
+        """
+        Visualize the roads on a 2D plot using matplotlib.
+        """
+
+        # Plot each road
+        for road in self.road_list:
+            plt.plot(
+                [road.start.latitude, road.end.latitude],
+                [road.start.longitude, road.end.longitude],
+                color=DEFAULT_COLOR_OF_ROAD,
+                linestyle=DEFAULT_STYLE_OF_ROAD,
+                linewidth=DEFAULT_WIDTH_OF_ROAD,
+                label="Road" if "Road" not in self.unique_label else "",
+            )
+            self.unique_label.append("Road")
 
     def visualize(self):
         plt.xlabel("Latitude")
@@ -342,18 +321,19 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         for i in range(NUMBER_OF_NDP_CUSTOMER):
             self.ndp_customer_list.append(
                 NDP_Customer(
-                    round(
+                    latitude=round(
                         random.uniform(
                             RANGE_OF_NDP_CUSTOMER[0][0], RANGE_OF_NDP_CUSTOMER[0][1]
                         ),
                         4,
                     ),
-                    round(
+                    longitude=round(
                         random.uniform(
                             RANGE_OF_NDP_CUSTOMER[1][0], RANGE_OF_NDP_CUSTOMER[1][1]
                         ),
                         4,
                     ),
+                    name=f"{NDP_CUSTOMER_NAME}_{i+1}",
                 )
             )
 
@@ -361,18 +341,19 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         for i in range(NUMBER_OF_HDP_CUSTOMER):
             self.hdp_customer_list.append(
                 HDP_Customer(
-                    round(
+                    latitude=round(
                         random.uniform(
                             RANGE_OF_HDP_CUSTOMER[0][0], RANGE_OF_HDP_CUSTOMER[0][1]
                         ),
                         4,
                     ),
-                    round(
+                    longitude=round(
                         random.uniform(
                             RANGE_OF_HDP_CUSTOMER[1][0], RANGE_OF_HDP_CUSTOMER[1][1]
                         ),
                         4,
                     ),
+                    name=f"{HDP_CUSTOMER_NAME}_{i+1}",
                 )
             )
 
@@ -381,26 +362,17 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         # Add depot
         self.map_graph.add_location(self.depot)
 
-        for customer in self.ndp_customer_list:
-            self.map_graph.add_location(customer)
+        # Add NDP customers
+        if ENABLE_NDP_CUSTOMERS:
+            for customer in self.ndp_customer_list:
+                self.map_graph.add_location(customer)
 
-        for customer in self.hdp_customer_list:
-            self.map_graph.add_location(customer)
+        # Add HDP customers
+        if ENABLE_HDP_CUSTOMERS:
+            for customer in self.hdp_customer_list:
+                self.map_graph.add_location(customer)
 
-    def compose_roads(self):
-        """
-        Visualize the roads on a 2D plot using matplotlib.
-        """
-        plt.figure(figsize=(10, 8))
-
-        # Plot each road
-        for start, end, distance in self.map_graph.roads:
-            plt.plot(
-                [start, end],
-                [start.y, end.y],
-                "b-",  # Blue color, circle markers, solid line
-                markersize=5,
-            )
+        # Add roads
 
     def visualize(self, enable_coordinates: bool = True, enable_roads: bool = True):
         plt.figure(figsize=FIG_SIZE)
@@ -409,8 +381,8 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             raise Warning("Please enable at least one option to visualize")
         if enable_coordinates:
             self.map_graph.compose_visualization_coordinates()
-        # if enable_roads:
-        #     self.compose_roads()
+        if enable_roads:
+            self.map_graph.compose_visualization_roads()
 
         self.map_graph.visualize()
 
@@ -418,7 +390,7 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 def main():
     problem = MultiObjectiveVehicleRoutingProblem()
 
-    problem.visualize()
+    problem.visualize(ENABLE_COORDINATES, ENABLE_ROADS)
 
 
 if __name__ == "__main__":
