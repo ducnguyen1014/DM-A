@@ -5,7 +5,7 @@ from scipy.spatial.distance import cdist
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
-from pymoo.operators.sampling.rnd import FloatRandomSampling
+from pymoo.operators.sampling.rnd import PermutationRandomSampling
 from pymoo.optimize import minimize
 
 text_align = 0.5
@@ -32,7 +32,18 @@ max_trucks = 3  # Adjust based on constraints
 
 # Calculate pairwise distances including depot
 all_points = np.vstack([depot, customers])
+print(all_points)
+
 distances = cdist(all_points, all_points)
+print(distances)
+
+
+class CustomRandomSampling(PermutationRandomSampling):
+    def _do(self, problem, n_samples, **kwargs):
+        return [
+            np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype=int),
+            np.array([9, 1, 2, 3, 4, 5, 6, 7, 8, 0], dtype=int),
+        ]
 
 
 class VRPProblem(ElementwiseProblem):
@@ -41,8 +52,8 @@ class VRPProblem(ElementwiseProblem):
             n_var=num_customers,
             n_obj=2,
             n_constr=0,
-            xl=0,
-            xu=num_customers - 1,
+            xl=1,
+            xu=num_customers,
             **kwargs,
         )
         self.max_trucks = max_trucks
@@ -51,7 +62,8 @@ class VRPProblem(ElementwiseProblem):
     def _evaluate(self, x, out, *args, **kwargs):
         # Decode the permutation to a route assignment
         permutation = np.argsort(x)  # Sort indices to get customer visit order
-        split_points = np.array_split(permutation, self.max_trucks)
+        # split_points = np.array_split(permutation, self.max_trucks)
+        split_points = np.array_split(x.astype(int), self.max_trucks)
 
         # Objective 1: Maximum distance traveled by any truck
         max_route_distance = 0
@@ -72,14 +84,14 @@ class VRPProblem(ElementwiseProblem):
 
 
 # Instantiate the problem
-problem = VRPProblem(max_trucks=max_trucks, distances=distances)
+problem = VRPProblem(max_trucks=max_trucks, distances=distances, hello="hello world")
 
 
 # Configure the genetic algorithm
 algorithm = NSGA2(
-    pop_size=40,
+    pop_size=2,
     n_offsprings=10,
-    sampling=FloatRandomSampling(),
+    sampling=CustomRandomSampling(),
     crossover=SBX(prob=0.9, eta=15),
     mutation=PM(eta=20),
     eliminate_duplicates=True,
