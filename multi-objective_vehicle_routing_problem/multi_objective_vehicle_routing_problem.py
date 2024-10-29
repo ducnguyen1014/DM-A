@@ -53,7 +53,7 @@ ENABLE_ROADS = True
 ENABLE_NDP_CUSTOMERS = True
 ENABLE_HDP_CUSTOMERS = False
 
-ENABLE_GRID = False
+ENABLE_GRID = True
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
 
@@ -103,8 +103,7 @@ RANGE_OF_MAP = (
 
 
 # Transportation
-NUMBER_OF_VEHICLE = 1
-
+MAX_NUMBER_OF_TRUCK = 10
 
 # =================================================================
 
@@ -243,7 +242,6 @@ class MapGraph:
     def __init__(self):
         self.coordinate_list: List[Coordinates] = []
         self.road_list: List[Road] = []
-        self.graph = defaultdict(list)
         self.unique_label: list[str] = []
 
     def add_location(self, location: Coordinates):
@@ -252,7 +250,6 @@ class MapGraph:
 
         if location not in self.coordinate_list:
             self.coordinate_list.append(location)
-            self.graph[location] = []
 
     def road_exists(self, new_road: Road):
         if new_road in self.road_list:
@@ -286,15 +283,12 @@ class MapGraph:
                 self.add_location(start)
                 self.add_location(end)
 
-                # Add the road (edge) in both directions (undirected graph)
-                self.graph[start].append((end, new_road.get_distance()))
-                self.graph[end].append((start, new_road.get_distance()))
-
     def compose_visualization_coordinates(self):
         """
         Visualize the graph with coordinates as points.
         """
 
+        customer_count = 1
         for coordinate in self.coordinate_list:
             # Plot all coordinates
             label = coordinate.name.rsplit("_", 1)[0]
@@ -308,15 +302,22 @@ class MapGraph:
                 label=(label if label not in self.unique_label else ""),
             )
 
+            self.unique_label.append(label)
+
             if ENABLE_POINT_LABEL:
+                label = ""
+                if coordinate.name == DEPOT_NAME:
+                    label = DEPOT_NAME
+                else:
+                    label = customer_count
+                    customer_count += 1
+
                 plt.text(
                     coordinate.latitude + 1,
                     coordinate.longitude + 1,
-                    coordinate.name,
+                    label,
                     fontsize=9,
                 )
-
-            self.unique_label.append(label)
 
     def compose_visualization_roads(self):
         """
@@ -350,52 +351,52 @@ class MapGraph:
         plt.show()
 
 
-class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
-    def __init__(self):
+class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
+    def __init__(
+        self,
+        max_number_of_trucks: int,
+        number_of_ndp_customer: int,
+        range_of_ndp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
+    ):
+        self.max_number_of_trucks = max_number_of_trucks
+        self.number_of_ndp_customer = number_of_ndp_customer
+        self.range_of_ndp_customer = range_of_ndp_customer
+
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
         self.ndp_customer_list: list[NDP_Customer] = []
-        self.hdp_customer_list: list[HDP_Customer] = []
 
+        # Define map
         self.define_map()
+
+        # Define problem
+        super().__init__(
+            n_var=self.number_of_ndp_customer,
+            n_obj=2,
+            n_constr=0,
+            xl=1,
+            xu=self.number_of_ndp_customer,
+        )
 
     def define_map(self):
         # Add NDP locations
-        for i in range(NUMBER_OF_NDP_CUSTOMER):
+        for i in range(self.number_of_ndp_customer):
             self.ndp_customer_list.append(
                 NDP_Customer(
                     latitude=round(
                         random.uniform(
-                            RANGE_OF_NDP_CUSTOMER[0][0], RANGE_OF_NDP_CUSTOMER[0][1]
+                            self.range_of_ndp_customer[0][0],
+                            self.range_of_ndp_customer[0][1],
                         ),
                         4,
                     ),
                     longitude=round(
                         random.uniform(
-                            RANGE_OF_NDP_CUSTOMER[1][0], RANGE_OF_NDP_CUSTOMER[1][1]
+                            self.range_of_ndp_customer[1][0],
+                            self.range_of_ndp_customer[1][1],
                         ),
                         4,
                     ),
                     name=f"{NDP_CUSTOMER_NAME}_{i+1}",
-                )
-            )
-
-        # Add HDP locations
-        for i in range(NUMBER_OF_HDP_CUSTOMER):
-            self.hdp_customer_list.append(
-                HDP_Customer(
-                    latitude=round(
-                        random.uniform(
-                            RANGE_OF_HDP_CUSTOMER[0][0], RANGE_OF_HDP_CUSTOMER[0][1]
-                        ),
-                        4,
-                    ),
-                    longitude=round(
-                        random.uniform(
-                            RANGE_OF_HDP_CUSTOMER[1][0], RANGE_OF_HDP_CUSTOMER[1][1]
-                        ),
-                        4,
-                    ),
-                    name=f"{HDP_CUSTOMER_NAME}_{i+1}",
                 )
             )
 
@@ -409,49 +410,10 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             for customer in self.ndp_customer_list:
                 self.map_graph.add_location(customer)
 
-        # Add HDP customers
-        if ENABLE_HDP_CUSTOMERS:
-            for customer in self.hdp_customer_list:
-                self.map_graph.add_location(customer)
-
         # Add Depot - NDP Customer roads
         if ENABLE_NDP_CUSTOMERS:
-            self.map_graph.add_road("Depot", "NDP_1")
-            self.map_graph.add_road("Depot", "NDP_2")
-            self.map_graph.add_road("Depot", "NDP_3")
-            self.map_graph.add_road("Depot", "NDP_4")
-            self.map_graph.add_road("Depot", "NDP_5")
-
-            self.map_graph.add_road("NDP_1", "NDP_3")
-            self.map_graph.add_road("NDP_1", "NDP_5")
-
-            self.map_graph.add_road("NDP_2", "NDP_3")
-            self.map_graph.add_road("NDP_2", "NDP_4")
-
-        # Add Depot - HDP Customer roads
-        if ENABLE_HDP_CUSTOMERS:
-            self.map_graph.add_road("Depot", "HDP_5")
-
-            self.map_graph.add_road("HDP_1", "HDP_4")
-            self.map_graph.add_road("HDP_1", "HDP_5")
-
-            self.map_graph.add_road("HDP_3", "HDP_4")
-
-            self.map_graph.add_road("HDP_4", "HDP_5")
-
-        # Add NDP Customer - HDP Customer roads
-        if ENABLE_NDP_CUSTOMERS and ENABLE_HDP_CUSTOMERS:
-            self.map_graph.add_road("NDP_1", "HDP_2")
-
-            self.map_graph.add_road("NDP_2", "HDP_3")
-
-            self.map_graph.add_road("NDP_3", "HDP_2")
-
-            self.map_graph.add_road("NDP_4", "HDP_3")
-            self.map_graph.add_road("NDP_4", "HDP_4")
-            self.map_graph.add_road("NDP_4", "HDP_5")
-
-            self.map_graph.add_road("NDP_5", "HDP_5")
+            pass
+            # self.map_graph.add_road("Depot", "NDP_1")
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
@@ -462,7 +424,11 @@ class MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
 
 def main():
-    problem = MultiObjectiveVehicleRoutingProblem()
+    problem = NDP_MultiObjectiveVehicleRoutingProblem(
+        max_number_of_trucks=MAX_NUMBER_OF_TRUCK,
+        number_of_ndp_customer=NUMBER_OF_NDP_CUSTOMER,
+        range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
+    )
 
     problem.visualize()
 
