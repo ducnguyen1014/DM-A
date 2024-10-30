@@ -1,10 +1,9 @@
 from pymoo.core.problem import ElementwiseProblem
 from typing import List, Tuple
 import numpy as np
-from collections import defaultdict
 import matplotlib.pyplot as plt
 import random
-
+from itertools import combinations
 
 # PARAMETERS ======================================================
 
@@ -45,6 +44,7 @@ import random
 # Random
 SEED = 30
 random.seed(SEED)
+np.random.seed(SEED)
 
 
 # Plot settings
@@ -56,6 +56,7 @@ ENABLE_HDP_CUSTOMERS = False
 ENABLE_GRID = True
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
+
 
 # Depot - This problem contains only one depot
 DEPOT_NAME = "Depot"
@@ -104,6 +105,11 @@ RANGE_OF_MAP = (
 
 # Transportation
 MAX_NUMBER_OF_TRUCK = 10
+
+
+# Coefficients
+WEIGHT_OF_MAX_NUMBER_OF_TRUCK_ = 0.5  # Range: 0.0 - 1.0
+WEIGHT_OF_MAX_DISTANCE_AMONG_TRUCKS = 0.5  # Range: 0.0 - 1.0
 
 # =================================================================
 
@@ -243,6 +249,7 @@ class MapGraph:
         self.coordinate_list: List[Coordinates] = []
         self.road_list: List[Road] = []
         self.unique_label: list[str] = []
+        self.distance_matrix: np.ndarray = None
 
     def add_location(self, location: Coordinates):
         if not ENABLE_COORDINATES:
@@ -282,6 +289,32 @@ class MapGraph:
                 self.road_list.append(new_road)
                 self.add_location(start)
                 self.add_location(end)
+
+    def calculate_distance_matrix(self):
+        # Extract latitudes and longitudes as NumPy arrays
+        latitudes = np.array([coord.latitude for coord in self.coordinate_list])
+        longitudes = np.array([coord.longitude for coord in self.coordinate_list])
+
+        # Stack latitudes and longitudes into a 2D array of shape (n, 2)
+        points = np.vstack((latitudes, longitudes)).T
+
+        # Calculate the distance matrix using broadcasting and vectorized operations
+        diff = points[:, np.newaxis, :] - points[np.newaxis, :, :]
+        self.distance_matrix = np.sqrt(np.sum(diff**2, axis=-1))
+
+    def get_distance_matrix(self, normalize: bool = False):
+        distance_matrix = self.distance_matrix.copy()
+
+        if normalize:
+            min_val = np.min(distance_matrix)
+            max_val = np.max(distance_matrix)
+            # Avoid division by zero if all values are the same
+            if max_val > min_val:
+                distance_matrix = (distance_matrix - min_val) / (max_val - min_val)
+            else:
+                distance_matrix = np.zeros_like(distance_matrix)
+
+        return distance_matrix
 
     def compose_visualization_coordinates(self):
         """
@@ -358,24 +391,65 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         number_of_ndp_customer: int,
         range_of_ndp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
     ):
-        self.max_number_of_trucks = max_number_of_trucks
+        self.max_number_of_trucks = self.validate_number_of_trucks(max_number_of_trucks)
         self.number_of_ndp_customer = number_of_ndp_customer
         self.range_of_ndp_customer = range_of_ndp_customer
+
+        self.normalized_distance_matrix: np.ndarray = None
+        self.min_number_of_trucks = 1
 
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
         self.ndp_customer_list: list[NDP_Customer] = []
 
         # Define map
         self.define_map()
+        self.map_graph.calculate_distance_matrix()
+
+        # Normalize objective
+        self.normalized_distance_matrix = self.map_graph.get_distance_matrix(
+            normalize=True
+        )
 
         # Define problem
         super().__init__(
             n_var=self.number_of_ndp_customer,
-            n_obj=2,
+            n_obj=1,
             n_constr=0,
             xl=1,
             xu=self.number_of_ndp_customer,
         )
+
+    def _evaluate(self, x, out, *args, **kwargs):
+        """
+        Input x is permutation of customers.
+
+        For example: Number of customers is 8
+        x is [6, 7, 5, 1, 2, 8, 3, 4]
+        """
+
+        customer_list: List[int] = x
+        all_splits = self.generate_splits(customer_list, self.max_number_of_trucks)
+
+        for split_points in all_splits:
+            # Objective 1: Maximum distance traveled by any truck
+            max_route_distance = 0
+
+            for route in split_points:
+                route_distance = 0.0
+                prev_point = 0  # Start at depot
+                for customer in route:
+                    route_distance += self.distances[prev_point, customer + 1]
+                    prev_point = customer + 1  # Move to the next customer
+                route_distance += self.distances[prev_point, 0]  # Return to depot
+                max_route_distance = max(max_route_distance, route_distance)
+
+            # Objective 2: Minimize the number of trucks used
+            trucks_used = len(split_points)  # Number of routes created
+
+        # What is the objective here ?
+
+        # Set the objective values
+        out["F"] = np.array([best_max_route_distance, best_trucks_used])
 
     def define_map(self):
         # Add NDP locations
@@ -414,6 +488,48 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         if ENABLE_NDP_CUSTOMERS:
             pass
             # self.map_graph.add_road("Depot", "NDP_1")
+
+    @staticmethod
+    def validate_number_of_trucks(number_of_trucks: int):
+        if not isinstance(number_of_trucks, int):
+            raise ValueError("number_of_trucks must be an integer.")
+        if number_of_trucks < 1:
+            raise ValueError(f"number_of_trucks must be greater or equal 1.")
+        return number_of_trucks
+
+    def normalize_max_number_of_trucks(self, value):
+        # Min-max normalization formula
+        value = self.validate_number_of_trucks(value)
+
+        return (value - 1) / (self.max_number_of_trucks - 1)
+
+    def generate_splits(self, customers: List[int], max_trucks: int):
+        """
+        Generate all possible splits of customers into 1 to max_trucks groups.
+        Returns a list of lists, where each sublist is a grouping of customers.
+        """
+        all_splits = []
+
+        max_trucks = self.validate_number_of_trucks(max_trucks)
+
+        for num_trucks in range(1, max_trucks + 1):
+            # Generate all combinations of splits for the current number of trucks
+            # We create indices for splitting
+            indices = range(1, len(customers))  # Indices to split on
+
+            # Find all combinations of splitting indices
+            for comb in combinations(
+                indices, num_trucks - 1
+            ):  # num_trucks - 1 splits create num_trucks groups
+                # Create split points based on the current combination of indices
+                split_points = (0,) + comb + (len(customers),)
+                split = [
+                    customers[split_points[i] : split_points[i + 1]]
+                    for i in range(num_trucks)
+                ]
+                all_splits.append(split)
+
+        return all_splits
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)

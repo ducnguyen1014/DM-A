@@ -8,8 +8,6 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.operators.sampling.rnd import PermutationRandomSampling
 from pymoo.optimize import minimize
 
-text_align = 0.5
-
 # Define the depot and customer coordinates
 depot = np.array([50, 50])
 customers = np.array(
@@ -28,26 +26,22 @@ customers = np.array(
 )
 
 num_customers = len(customers)
-max_trucks = 3  # Adjust based on constraints
+max_trucks = 5  # Adjust based on constraints
 
 # Calculate pairwise distances including depot
 all_points = np.vstack([depot, customers])
-print(all_points)
-
 distances = cdist(all_points, all_points)
-print(distances)
 
 
+# Custom random sampling to provide initial permutations without duplicates
 class CustomRandomSampling(PermutationRandomSampling):
     def _do(self, problem, n_samples, **kwargs):
-        return [
-            np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], dtype=int),
-            np.array([9, 1, 2, 3, 4, 5, 6, 7, 8, 0], dtype=int),
-        ]
+        return [np.random.permutation(num_customers) for _ in range(n_samples)]
 
 
+# Define the VRP problem with dynamic truck usage and standardized objectives
 class VRPProblem(ElementwiseProblem):
-    def __init__(self, max_trucks, distances, **kwargs):
+    def __init__(self, max_trucks, distances, max_distance=None, **kwargs):
         super().__init__(
             n_var=num_customers,
             n_obj=2,
@@ -58,16 +52,17 @@ class VRPProblem(ElementwiseProblem):
         )
         self.max_trucks = max_trucks
         self.distances = distances
+        self.max_distance = max_distance or np.sum(distances)  # Estimate max distance
+        self.max_trucks_used = max_trucks  # Set as max for normalization
 
     def _evaluate(self, x, out, *args, **kwargs):
-        # Decode the permutation to a route assignment
-        permutation = np.argsort(x)  # Sort indices to get customer visit order
-        # split_points = np.array_split(permutation, self.max_trucks)
-        split_points = np.array_split(x.astype(int), self.max_trucks)
+        # Sort x to get customer visit order and split into routes
+        split_points = np.array_split(np.sort(x.astype(int)), self.max_trucks)
+        used_trucks = [route for route in split_points if len(route) > 0]
 
         # Objective 1: Maximum distance traveled by any truck
         max_route_distance = 0
-        for route in split_points:
+        for route in used_trucks:
             route_distance = 0
             prev_point = 0  # Start at depot
             for customer in route:
@@ -77,19 +72,21 @@ class VRPProblem(ElementwiseProblem):
             max_route_distance = max(max_route_distance, route_distance)
 
         # Objective 2: Minimize the number of trucks used
-        trucks_used = sum([1 for route in split_points if len(route) > 0])
+        trucks_used = len(used_trucks)
 
-        # Set the objective values
-        out["F"] = np.array([max_route_distance, trucks_used])
+        # Normalize objectives
+        normalized_distance = max_route_distance / self.max_distance
+        normalized_trucks_used = trucks_used / self.max_trucks_used
+
+        out["F"] = np.array([normalized_distance, normalized_trucks_used])
 
 
 # Instantiate the problem
-problem = VRPProblem(max_trucks=max_trucks, distances=distances, hello="hello world")
-
+problem = VRPProblem(max_trucks=max_trucks, distances=distances)
 
 # Configure the genetic algorithm
 algorithm = NSGA2(
-    pop_size=2,
+    pop_size=40,
     n_offsprings=10,
     sampling=CustomRandomSampling(),
     crossover=SBX(prob=0.9, eta=15),
@@ -103,62 +100,37 @@ res = minimize(problem, algorithm, ("n_gen", 100), verbose=True)
 # Display the results
 print("Best solutions found:")
 for f in res.F:
-    print("Max Distance:", f[0], "Trucks Used:", f[1])
+    print("Max Distance (Normalized):", f[0], "Trucks Used (Normalized):", f[1])
 
 # Display route assignments for one solution
 best_solution = res.X[0]
-
 customer_order = np.argsort(best_solution)
-
-# Assuming you are using 2 trucks as per the problem setup
 split_routes = np.array_split(customer_order, max_trucks)
 
 # Display the routes for each truck
 for i, route in enumerate(split_routes):
-    print(f"Truck {i+1} will visit customers in this order:", route + 1)
+    if len(route) > 0:
+        print(f"Truck {i+1} will visit customers in this order:", route + 1)
 
 # Plot the best solution
-best_permutation = np.argsort(res.X[0])
-split_routes = np.array_split(best_permutation, max_trucks)
-
-# Set up plot
 plt.figure(figsize=(10, 8))
 plt.scatter(depot[0], depot[1], color="red", label="Depot", s=100, marker="D")
 plt.scatter(customers[:, 0], customers[:, 1], color="blue", label="Customer", s=80)
 
 # Label all points
-plt.text(
-    depot[0] + text_align,
-    depot[1] + text_align,
-    "D",
-    color="red",
-    fontsize=12,
-    ha="center",
-    va="center",
-)
+plt.text(depot[0], depot[1], "D", color="red", fontsize=12, ha="center", va="center")
 for i, (x, y) in enumerate(customers):
-    plt.text(
-        x + text_align,
-        y + text_align,
-        str(i + 1),
-        color="blue",
-        fontsize=12,
-        ha="center",
-        va="center",
-    )
+    plt.text(x, y, str(i + 1), color="blue", fontsize=12, ha="center", va="center")
 
 # Colors for each truck
 colors = ["orange", "green", "purple", "cyan", "magenta", "yellow", "brown", "pink"]
 
 # Draw paths for each truck
 for i, route in enumerate(split_routes):
-    route_distance = 0
-    route_points = (
-        [0] + [customer + 1 for customer in route] + [0]
-    )  # Route includes return to depot
+    if len(route) == 0:
+        continue
+    route_points = [0] + [customer + 1 for customer in route] + [0]  # Include depot
     color = colors[i % len(colors)]
-
-    # Plot each segment in the route
     for j in range(len(route_points) - 1):
         start = all_points[route_points[j]]
         end = all_points[route_points[j + 1]]
