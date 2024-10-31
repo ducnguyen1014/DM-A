@@ -387,16 +387,11 @@ class MapGraph:
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
     def __init__(
         self,
-        max_number_of_trucks: int,
         number_of_ndp_customer: int,
         range_of_ndp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
     ):
-        self.max_number_of_trucks = self.validate_number_of_trucks(max_number_of_trucks)
         self.number_of_ndp_customer = number_of_ndp_customer
         self.range_of_ndp_customer = range_of_ndp_customer
-
-        self.normalized_distance_matrix: np.ndarray = None
-        self.min_number_of_trucks = 1
 
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
         self.ndp_customer_list: list[NDP_Customer] = []
@@ -426,30 +421,7 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         For example: Number of customers is 8
         x is [6, 7, 5, 1, 2, 8, 3, 4]
         """
-
-        customer_list: List[int] = x
-        all_splits = self.generate_splits(customer_list, self.max_number_of_trucks)
-
-        for split_points in all_splits:
-            # Objective 1: Maximum distance traveled by any truck
-            max_route_distance = 0
-
-            for route in split_points:
-                route_distance = 0.0
-                prev_point = 0  # Start at depot
-                for customer in route:
-                    route_distance += self.distances[prev_point, customer + 1]
-                    prev_point = customer + 1  # Move to the next customer
-                route_distance += self.distances[prev_point, 0]  # Return to depot
-                max_route_distance = max(max_route_distance, route_distance)
-
-            # Objective 2: Minimize the number of trucks used
-            trucks_used = len(split_points)  # Number of routes created
-
-        # What is the objective here ?
-
-        # Set the objective values
-        out["F"] = np.array([best_max_route_distance, best_trucks_used])
+        pass
 
     def define_map(self):
         # Add NDP locations
@@ -489,48 +461,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             pass
             # self.map_graph.add_road("Depot", "NDP_1")
 
-    @staticmethod
-    def validate_number_of_trucks(number_of_trucks: int):
-        if not isinstance(number_of_trucks, int):
-            raise ValueError("number_of_trucks must be an integer.")
-        if number_of_trucks < 1:
-            raise ValueError(f"number_of_trucks must be greater or equal 1.")
-        return number_of_trucks
-
-    def normalize_max_number_of_trucks(self, value):
-        # Min-max normalization formula
-        value = self.validate_number_of_trucks(value)
-
-        return (value - 1) / (self.max_number_of_trucks - 1)
-
-    def generate_splits(self, customers: List[int], max_trucks: int):
-        """
-        Generate all possible splits of customers into 1 to max_trucks groups.
-        Returns a list of lists, where each sublist is a grouping of customers.
-        """
-        all_splits = []
-
-        max_trucks = self.validate_number_of_trucks(max_trucks)
-
-        for num_trucks in range(1, max_trucks + 1):
-            # Generate all combinations of splits for the current number of trucks
-            # We create indices for splitting
-            indices = range(1, len(customers))  # Indices to split on
-
-            # Find all combinations of splitting indices
-            for comb in combinations(
-                indices, num_trucks - 1
-            ):  # num_trucks - 1 splits create num_trucks groups
-                # Create split points based on the current combination of indices
-                split_points = (0,) + comb + (len(customers),)
-                split = [
-                    customers[split_points[i] : split_points[i + 1]]
-                    for i in range(num_trucks)
-                ]
-                all_splits.append(split)
-
-        return all_splits
-
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
 
@@ -541,7 +471,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
 def main():
     problem = NDP_MultiObjectiveVehicleRoutingProblem(
-        max_number_of_trucks=MAX_NUMBER_OF_TRUCK,
         number_of_ndp_customer=NUMBER_OF_NDP_CUSTOMER,
         range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
     )
