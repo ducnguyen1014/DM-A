@@ -1,9 +1,14 @@
+from pymoo.operators.sampling.rnd import Sampling
 from pymoo.core.problem import ElementwiseProblem
+from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.operators.crossover.sbx import SBX
+from pymoo.operators.mutation.pm import PM
+from pymoo.optimize import minimize
+
 from typing import List, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 import random
-from itertools import combinations
 
 # PARAMETERS ======================================================
 
@@ -384,6 +389,44 @@ class MapGraph:
         plt.show()
 
 
+class CustomRandomSampling(Sampling):
+    """
+    A sample has the following format:
+    [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
+
+    The input contains 2 parts:
+    - The first part is the number of truck to used.
+    - The second part is the permutation of the customer list with a boundary flag between trucks.
+    """
+
+    def __init__(self, number_of_truck, number_of_customer):
+        super().__init__()
+        self.number_of_truck = number_of_truck
+        self.number_of_customer = number_of_customer
+
+    def _do(self, problem, n_samples, **kwargs):
+        X = []  # Start with an empty list to hold samples
+
+        # Generate random permutations for each sample
+        for _ in range(n_samples):
+            # Create a random permutation of customer indices
+            permutation = np.random.permutation(self.number_of_customer) + 1
+
+            # Insert zero after each element in the permutation
+            perm_with_zeros = np.zeros(2 * self.number_of_customer, dtype=int)
+            perm_with_zeros[0::2] = (
+                permutation  # Set customer indices at even positions
+            )
+
+            # Add the number of trucks at the start of the list and concatenate with perm_with_zeros
+            sample = np.insert(perm_with_zeros, 0, self.number_of_truck)
+
+            # Add the generated sample to the list
+            X.append(sample)
+
+        return np.array(X)
+
+
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
     def __init__(
         self,
@@ -398,6 +441,8 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
         # Define map
         self.define_map()
+
+        # Calculate distance between coordinates (matrix)
         self.map_graph.calculate_distance_matrix()
 
         # Normalize objective
@@ -405,22 +450,24 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             normalize=True
         )
 
+        xl: np.array = self.calculate_x_lower_bound()
+        xu: np.array = self.calculate_x_upper_bound()
+
         # Define problem
         super().__init__(
-            n_var=self.number_of_ndp_customer,
-            n_obj=1,
-            n_constr=0,
-            xl=1,
-            xu=self.number_of_ndp_customer,
+            n_var=self.number_of_ndp_customer * 2 + 1, n_obj=2, n_constr=0, xl=xl, xu=xu
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
         """
-        Input x is permutation of customers.
+        A sample has the following format:
+        [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
 
-        For example: Number of customers is 8
-        x is [6, 7, 5, 1, 2, 8, 3, 4]
+        The input contains 2 parts:
+        - The first part is the number of truck to used.
+        - The second part is the permutation of the customer list with a boundary flag between trucks.
         """
+        _ = x
         pass
 
     def define_map(self):
@@ -461,6 +508,31 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             pass
             # self.map_graph.add_road("Depot", "NDP_1")
 
+    def calculate_x_lower_bound(self):
+        # First element is 1
+        lower_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
+        lower_bound[0] = 1
+
+        # Alternate 1 and 0 starting from the second position
+        lower_bound[1::2] = 1  # Set 1 at all odd indices
+        lower_bound[2::2] = 0  # Set 0 at all even indices
+
+        return lower_bound
+
+    def calculate_x_upper_bound(self):
+        # First element is number_of_truck
+        number_of_truck = self.number_of_ndp_customer
+        upper_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
+        upper_bound[0] = number_of_truck
+
+        # Alternate between number_of_ndp_customer and 0 starting from the second position
+        upper_bound[1::2] = (
+            self.number_of_ndp_customer
+        )  # Set number_of_ndp_customer at all odd indices
+        upper_bound[2::2] = 0  # Set 0 at all even indices
+
+        return upper_bound
+
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
 
@@ -475,7 +547,19 @@ def main():
         range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
     )
 
-    problem.visualize()
+    # problem.visualize()
+
+    algorithm = NSGA2(
+        pop_size=40,
+        n_offsprings=10,
+        sampling=CustomRandomSampling(5, 5),
+        crossover=SBX(prob=0.9, eta=15),
+        mutation=PM(eta=20),
+        eliminate_duplicates=True,
+    )
+
+    # Run the optimization
+    res = minimize(problem, algorithm, ("n_gen", 100), verbose=True)
 
 
 if __name__ == "__main__":
