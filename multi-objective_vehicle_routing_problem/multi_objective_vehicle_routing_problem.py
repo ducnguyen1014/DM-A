@@ -389,39 +389,7 @@ class MapGraph:
         plt.show()
 
 
-class NDP_CustomRandomSampling(Sampling):
-    """
-    A sample has the following format:
-    [6, 4, 1, 6, 3, 5, 2]
-
-    The input contains 2 parts:
-    - The first part is the number of truck to used.
-    - The second part is the permutation of the customer list.
-    """
-
-    def __init__(self, number_of_truck, number_of_customer):
-        super().__init__()
-        self.number_of_truck = number_of_truck
-        self.number_of_customer = number_of_customer
-
-    def _do(self, problem, n_samples, **kwargs):
-        X = []  # Start with an empty list to hold samples
-
-        # Generate random permutations for each sample
-        for _ in range(n_samples):
-            # Create a random permutation of customer indices
-            permutation = np.random.permutation(self.number_of_customer) + 1
-
-            # Add the number of trucks at the start of the list and concatenate with perm_with_zeros
-            sample = np.insert(permutation, 0, self.number_of_truck)
-
-            # Add the generated sample to the list
-            X.append(sample)
-
-        return np.array(X)
-
-
-class HDP_CustomRandomSampling(Sampling):
+class CustomRandomSampling(Sampling):
     """
     A sample has the following format:
     [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
@@ -431,9 +399,9 @@ class HDP_CustomRandomSampling(Sampling):
     - The second part is the permutation of the customer list with a boundary flag between trucks.
     """
 
-    def __init__(self, number_of_truck, number_of_customer):
+    def __init__(self, number_of_customer):
         super().__init__()
-        self.number_of_truck = number_of_truck
+        self.number_of_truck = number_of_customer
         self.number_of_customer = number_of_customer
 
     def _do(self, problem, n_samples, **kwargs):
@@ -445,13 +413,10 @@ class HDP_CustomRandomSampling(Sampling):
             permutation = np.random.permutation(self.number_of_customer) + 1
 
             # Insert zero after each element in the permutation
-            perm_with_zeros = np.zeros(2 * self.number_of_customer, dtype=int)
-            perm_with_zeros[0::2] = (
-                permutation  # Set customer indices at even positions
-            )
+            sample = np.ones(2 * self.number_of_customer, dtype=int)
 
-            # Add the number of trucks at the start of the list and concatenate with perm_with_zeros
-            sample = np.insert(perm_with_zeros, 0, self.number_of_truck)
+            # Set customer indices at even positions
+            sample[0::2] = permutation
 
             # Add the generated sample to the list
             X.append(sample)
@@ -487,22 +452,20 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
         # Define problem
         super().__init__(
-            n_var=self.number_of_ndp_customer + 1, n_obj=2, n_constr=0, xl=xl, xu=xu
+            n_var=self.number_of_ndp_customer * 2 + 1, n_obj=2, n_constr=0, xl=xl, xu=xu
         )
 
     def _evaluate(self, x, out, *args, **kwargs):
         """
         A sample has the following format:
-        [6, 4, 1, 6, 3, 5, 2]
+        [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
 
         The input contains 2 parts:
         - The first part is the number of truck to used.
-        - The second part is the permutation of the customer list.
+        - The second part is the permutation of the customer list with a boundary flag between trucks.
         """
         number_of_truck = x[0]
         customer_list = np.argsort(x[1:]) + 1
-
-        splited_customers = np.array_split(customer_list, number_of_truck)
 
         # Objective 1: Maximum distance traveled by any truck (normalized)
         f1 = self.calculate_max_distance_among_trucks(
@@ -553,17 +516,27 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             # self.map_graph.add_road("Depot", "NDP_1")
 
     def calculate_x_lower_bound(self) -> np.array:
-        # All minimum values are 1
-        lower_bound = np.ones(self.number_of_ndp_customer + 1, dtype=int)
+        # First element is 1
+        lower_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
+        lower_bound[0] = 1
+
+        # Alternate 1 and 0 starting from the second position
+        lower_bound[1::2] = 1  # Set 1 at all odd indices
+        lower_bound[2::2] = 0  # Set 0 at all even indices
 
         return lower_bound
 
     def calculate_x_upper_bound(self) -> np.array:
-        # All maximum values are number of NDP customer
-        upper_bound = (
-            np.ones(self.number_of_ndp_customer + 1, dtype=int)
-            * self.number_of_ndp_customer
-        )
+        # First element is number_of_truck
+        number_of_truck = self.number_of_ndp_customer
+        upper_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
+        upper_bound[0] = number_of_truck
+
+        # Alternate between number_of_ndp_customer and 0 starting from the second position
+        upper_bound[1::2] = (
+            self.number_of_ndp_customer
+        )  # Set number_of_ndp_customer at all odd indices
+        upper_bound[2::2] = 0  # Set 0 at all even indices
 
         return upper_bound
 
@@ -572,9 +545,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         matrix_distance: np.ndarray,
         splited_customers: list[list[int]] | list[np.array],
     ) -> float:
-        # Use copy here to avoid affecting original matrix
-        matrix_distance = matrix_distance.copy()
-
         # Convert splited_customers to a numpy array if it isn't already
         splited_customers = [np.array(customers) for customers in splited_customers]
 
@@ -617,9 +587,9 @@ def main():
     # problem.visualize()
 
     algorithm = NSGA2(
-        pop_size=2,
-        n_offsprings=10,
-        sampling=NDP_CustomRandomSampling(5, 5),
+        pop_size=100,
+        n_offsprings=5,
+        sampling=CustomRandomSampling(5),
         crossover=SBX(prob=0.9, eta=15),
         mutation=PM(eta=20),
         eliminate_duplicates=True,
@@ -629,10 +599,12 @@ def main():
     res = minimize(problem, algorithm, ("n_gen", 100), verbose=True)
 
     best_solution = res.X[0]
-    best_solution[0] = int(best_solution[0])
-    best_solution[1:] = np.argsort(best_solution[1:])
+    number_of_truck_used = int(best_solution[0])
+    routes = np.array_split(np.argsort(best_solution[1:]), number_of_truck_used)
 
-    print(best_solution)
+    print(f"Number of truck used: {number_of_truck_used}")
+    print(f"Route: {routes}")
+    print(f"F: {res.f}")
 
 
 if __name__ == "__main__":
