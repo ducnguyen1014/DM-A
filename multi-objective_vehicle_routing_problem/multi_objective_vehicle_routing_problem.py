@@ -392,11 +392,18 @@ class MapGraph:
 class CustomRandomSampling(Sampling):
     """
     A sample has the following format:
-    [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
+    [4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 1]
 
-    The input contains 2 parts:
-    - The first part is the number of truck to used.
-    - The second part is the permutation of the customer list with a boundary flag between trucks.
+    For example.
+
+    The number of customers is 6.
+    With a permutation of customer list is [4, 1, 6, 3, 5, 2]. Add a binary flag after each customer to indicate routes. The last flag always is 1.
+
+    [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1] indicates that there are 2 routes
+    [4, 1, 6] and [3, 5, 2].
+
+    encoded routes: [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1]
+    decoed routes: [[4, 1, 6], [3, 5, 2]]
     """
 
     def __init__(self, number_of_customer):
@@ -417,11 +424,14 @@ class CustomRandomSampling(Sampling):
 
             # Set customer indices at even positions
             sample[0::2] = permutation
+            sample[1::2] = np.random.choice([0, 1], size=sample[1::2].shape)
+            # sample[1::2] = 1
+            sample[-1] = 1
 
             # Add the generated sample to the list
             X.append(sample)
 
-        return np.array(X)
+        return X
 
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
@@ -452,28 +462,27 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
         # Define problem
         super().__init__(
-            n_var=self.number_of_ndp_customer * 2 + 1, n_obj=2, n_constr=0, xl=xl, xu=xu
+            n_var=self.number_of_ndp_customer * 2, n_obj=2, n_constr=0, xl=xl, xu=xu
         )
 
-    def _evaluate(self, x, out, *args, **kwargs):
-        """
-        A sample has the following format:
-        [6, 4, 0, 1, 0, 6, 0, 3, 0, 5, 0, 2, 0]
+    def _evaluate(self, x: np.array, out, *args, **kwargs):
+        number_of_truck = np.round(x[1::2]).astype(int).sum()
+        encoded_routes = x
 
-        The input contains 2 parts:
-        - The first part is the number of truck to used.
-        - The second part is the permutation of the customer list with a boundary flag between trucks.
-        """
-        number_of_truck = x[0]
-        customer_list = np.argsort(x[1:]) + 1
+        # Convert to integer permutation
+        encoded_routes[0::2] = np.argsort(encoded_routes[0::2]) + 1
+
+        decoded_routes = self.decode_route(encoded_routes)
 
         # Objective 1: Maximum distance traveled by any truck (normalized)
         f1 = self.calculate_max_distance_among_trucks(
-            self.normalized_distance_matrix, splited_customers
+            self.normalized_distance_matrix, decoded_routes
         )
 
         # Objective 2: Minimize the number of trucks used (normalized)
         f2 = number_of_truck / self.number_of_ndp_customer
+
+        # print(f"{f1} \t {f2}")
 
         out["F"] = np.array([f1, f2])
 
@@ -516,59 +525,89 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             # self.map_graph.add_road("Depot", "NDP_1")
 
     def calculate_x_lower_bound(self) -> np.array:
-        # First element is 1
-        lower_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
-        lower_bound[0] = 1
+        lower_bound = np.zeros(self.number_of_ndp_customer * 2, dtype=int)
 
-        # Alternate 1 and 0 starting from the second position
-        lower_bound[1::2] = 1  # Set 1 at all odd indices
-        lower_bound[2::2] = 0  # Set 0 at all even indices
+        # Set 1 at all even indices (customer)
+        lower_bound[0::2] = 1
+
+        # Set 0 at all odd indices (flag indicate boundary of a route)
+        lower_bound[1::2] = 0
 
         return lower_bound
 
     def calculate_x_upper_bound(self) -> np.array:
-        # First element is number_of_truck
-        number_of_truck = self.number_of_ndp_customer
-        upper_bound = np.zeros(2 * self.number_of_ndp_customer + 1, dtype=int)
-        upper_bound[0] = number_of_truck
+        upper_bound = np.zeros(self.number_of_ndp_customer * 2, dtype=int)
 
-        # Alternate between number_of_ndp_customer and 0 starting from the second position
-        upper_bound[1::2] = (
-            self.number_of_ndp_customer
-        )  # Set number_of_ndp_customer at all odd indices
-        upper_bound[2::2] = 0  # Set 0 at all even indices
+        # Set number of NDP customers at all even indices (customer)
+        upper_bound[0::2] = self.number_of_ndp_customer
+
+        # Set 1 at all odd indices (flag indicate boundary of a route)
+        upper_bound[1::2] = 1
+
+        # Last flag always is 1
+        upper_bound[-1] = 1
 
         return upper_bound
 
-    @staticmethod
+    def decode_route(self, encoded_routes: np.array):
+        """
+        Decode routes.
+
+        Args:
+            encoded_routes (): [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1]
+
+        Returns:
+            decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
+        """
+        decoded_routes: List = []
+        current_group: List = []
+
+        for i in range(0, len(encoded_routes), 2):
+            # Append the even-index element to the current group
+            current_group.append(encoded_routes[i])
+
+            # Check if the next odd-index element is 1
+            if i + 1 < len(encoded_routes) and encoded_routes[i + 1] == 1:
+                # If it's a separator (1), add the current group to the result and start a new group
+                decoded_routes.append(current_group)
+                current_group = []
+
+        # Append the last group if it's non-empty
+        if current_group:
+            decoded_routes.append(current_group)
+
+        return decoded_routes
+
     def calculate_max_distance_among_trucks(
+        self,
         matrix_distance: np.ndarray,
-        splited_customers: list[list[int]] | list[np.array],
+        decoded_routes: List[List[int]],
     ) -> float:
-        # Convert splited_customers to a numpy array if it isn't already
-        splited_customers = [np.array(customers) for customers in splited_customers]
+        # Convert values of decoded_routes to int
+        decoded_routes = [
+            [int(value) for value in sublist] for sublist in decoded_routes
+        ]
 
         # Initialize max distance
-        max_distance = 0.0
+        max_distance_among_trucks = 0
 
-        # Calculate the maximum distance for each truck's route and update max_distance
-        for customers in splited_customers:
+        # Calculate the maximum distance for each truck's route and update max_distance_among_trucks
+        for route in decoded_routes:
             # Calculate the distance from the depot to the first customer
-            route_distance = matrix_distance[0, customers[0]]
+            route_distance = matrix_distance[0, route[0]]
 
             # Calculate total distance for this truck route
             route_distance += sum(
-                matrix_distance[customers[i], customers[i + 1]]
-                for i in range(len(customers) - 1)
+                matrix_distance[route[i], route[i + 1]] for i in range(len(route) - 1)
             )
 
             # Calculate the distance from the last customer to the depot
-            route_distance += matrix_distance[customers[-1], 0]
+            route_distance += matrix_distance[route[-1], 0]
 
-            # Update max_distance if this route's distance is larger
-            max_distance = max(max_distance, route_distance)
+            # Update max_distance_among_trucks if this route's distance is larger
+            max_distance_among_trucks = max(max_distance_among_trucks, route_distance)
 
-        return max_distance
+        return max_distance_among_trucks
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
@@ -587,24 +626,22 @@ def main():
     # problem.visualize()
 
     algorithm = NSGA2(
-        pop_size=100,
-        n_offsprings=5,
-        sampling=CustomRandomSampling(5),
+        pop_size=300,
+        n_offsprings=20,
+        sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
         crossover=SBX(prob=0.9, eta=15),
         mutation=PM(eta=20),
         eliminate_duplicates=True,
     )
 
     # Run the optimization
-    res = minimize(problem, algorithm, ("n_gen", 100), verbose=True)
+    res = minimize(problem, algorithm, ("n_gen", 200), verbose=True)
 
-    best_solution = res.X[0]
-    number_of_truck_used = int(best_solution[0])
-    routes = np.array_split(np.argsort(best_solution[1:]), number_of_truck_used)
-
-    print(f"Number of truck used: {number_of_truck_used}")
-    print(f"Route: {routes}")
-    print(f"F: {res.f}")
+    best_solution: np.array = res.X[0]
+    best_solution[0::2] = np.argsort(best_solution[0::2]) + 1
+    best_solution[1::2] = np.round(best_solution[1::2])
+    print(best_solution.astype(int).tolist())
+    print(res.F[0])
 
 
 if __name__ == "__main__":
