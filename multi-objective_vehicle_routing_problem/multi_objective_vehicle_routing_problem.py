@@ -9,6 +9,7 @@ from typing import List, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 import random
+import copy
 
 # PARAMETERS ======================================================
 
@@ -115,6 +116,32 @@ MAX_NUMBER_OF_TRUCK = 10
 # Coefficients
 WEIGHT_OF_MAX_NUMBER_OF_TRUCK_ = 0.5  # Range: 0.0 - 1.0
 WEIGHT_OF_MAX_DISTANCE_AMONG_TRUCKS = 0.5  # Range: 0.0 - 1.0
+
+
+# Route colors
+ROUTE_COLORS = [
+    "#FF5733",  # Vivid Orange
+    "#33A1FD",  # Sky Blue
+    "#8DFF33",  # Lime Green
+    "#E933FF",  # Hot Pink
+    "#FFD333",  # Golden Yellow
+    "#33FFD7",  # Aquamarine
+    "#FF3366",  # Bright Red-Pink
+    "#8A33FF",  # Purple
+    "#33FF8A",  # Bright Mint
+    "#FFB833",  # Orange-Yellow
+    "#338AFF",  # Bright Blue
+    "#FF33A1",  # Pink-Magenta
+    "#A1FF33",  # Yellow-Green
+    "#33FFD3",  # Turquoise
+    "#FF3380",  # Coral Pink
+    "#7FFF33",  # Chartreuse Green
+    "#33D7FF",  # Light Blue
+    "#D733FF",  # Purple Magenta
+    "#FF9A33",  # Vibrant Orange
+    "#33FF57",  # Jade Green
+]
+
 
 # =================================================================
 
@@ -255,6 +282,7 @@ class MapGraph:
         self.road_list: List[Road] = []
         self.unique_label: list[str] = []
         self.distance_matrix: np.ndarray = None
+        self.distance_scale_coefficients: Tuple[float, float] = tuple([1, 1])
 
     def add_location(self, location: Coordinates):
         if not ENABLE_COORDINATES:
@@ -268,7 +296,14 @@ class MapGraph:
             return True
         return False
 
-    def add_road(self, start_name: str, end_name: str):
+    def add_road(
+        self,
+        start_name: str,
+        end_name: str,
+        style: str = None,
+        width: str = None,
+        color: str = None,
+    ):
         """
         Add new road according to coordinates' names
         """
@@ -287,13 +322,23 @@ class MapGraph:
 
         for start in coordinates_with_start_name:
             for end in coordinates_with_end_name:
-                new_road = Road(start, end)
-                if self.road_exists(new_road):
-                    return
+                self.add_road(start, end, style, width, color)
 
-                self.road_list.append(new_road)
-                self.add_location(start)
-                self.add_location(end)
+    def add_road(
+        self,
+        start: Coordinates,
+        end: Coordinates,
+        style: str = None,
+        width: str = None,
+        color: str = None,
+    ):
+        new_road = Road(start, end, style, width, color)
+        if self.road_exists(new_road):
+            return
+
+        self.road_list.append(new_road)
+        self.add_location(start)
+        self.add_location(end)
 
     def calculate_distance_matrix(self):
         # Extract latitudes and longitudes as NumPy arrays
@@ -316,10 +361,18 @@ class MapGraph:
             # Avoid division by zero if all values are the same
             if max_val > min_val:
                 distance_matrix = (distance_matrix - min_val) / (max_val - min_val)
+                self.distance_scale_coefficients = tuple([min_val, max_val])
             else:
                 distance_matrix = np.zeros_like(distance_matrix)
 
         return distance_matrix
+
+    def rescale_distance(self, normalized_distance: float):
+        min_val, max_val = self.distance_scale_coefficients
+        return normalized_distance * (max_val - min_val) + min_val
+
+    def rescale_number_of_trucks(self, normalized_number_of_trucks: float):
+        return int(normalized_number_of_trucks * (len(self.coordinate_list) - 1))
 
     def compose_visualization_coordinates(self):
         """
@@ -434,7 +487,106 @@ class CustomRandomSampling(Sampling):
         return X
 
 
-class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
+class Helper:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def calculate_x_lower_bound(number_of_customer: int) -> np.array:
+        lower_bound = np.zeros(number_of_customer * 2, dtype=int)
+
+        # Set 1 at all even indices (customer)
+        lower_bound[0::2] = 1
+
+        # Set 0 at all odd indices (flag indicate boundary of a route)
+        lower_bound[1::2] = 0
+
+        return lower_bound
+
+    @staticmethod
+    def calculate_x_upper_bound(number_of_customer) -> np.array:
+        upper_bound = np.zeros(number_of_customer * 2, dtype=int)
+
+        # Set number of NDP customers at all even indices (customer)
+        upper_bound[0::2] = number_of_customer
+
+        # Set 1 at all odd indices (flag indicate boundary of a route)
+        upper_bound[1::2] = 1
+
+        # Last flag always is 1
+        upper_bound[-1] = 1
+
+        return upper_bound
+
+    @staticmethod
+    def calculate_max_distance_among_trucks(
+        matrix_distance: np.ndarray,
+        decoded_routes: List[List[int]],
+    ) -> float:
+        # Convert values of decoded_routes to int
+        decoded_routes = [
+            [int(value) for value in sublist] for sublist in decoded_routes
+        ]
+
+        # Initialize max distance
+        max_distance_among_trucks = 0
+
+        # Calculate the maximum distance for each truck's route and update max_distance_among_trucks
+        for route in decoded_routes:
+            # Calculate the distance from the depot to the first customer
+            route_distance = matrix_distance[0, route[0]]
+
+            # Calculate total distance for this truck route
+            route_distance += sum(
+                matrix_distance[route[i], route[i + 1]] for i in range(len(route) - 1)
+            )
+
+            # Calculate the distance from the last customer to the depot
+            route_distance += matrix_distance[route[-1], 0]
+
+            # Update max_distance_among_trucks if this route's distance is larger
+            max_distance_among_trucks = max(max_distance_among_trucks, route_distance)
+
+        return max_distance_among_trucks
+
+    @staticmethod
+    def decode_route(encoded_routes: np.array):
+        """
+        Decode routes.
+
+        Args:
+            encoded_routes (): [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1]
+
+        Returns:
+            decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
+        """
+        encoded_routes[0::2] = np.argsort(encoded_routes[0::2]) + 1
+        try:
+            encoded_routes = encoded_routes.astype(int)
+        except:
+            pass
+
+        decoded_routes: List = []
+        current_group: List = []
+
+        for i in range(0, len(encoded_routes), 2):
+            # Append the even-index element to the current group
+            current_group.append(encoded_routes[i])
+
+            # Check if the next odd-index element is 1
+            if i + 1 < len(encoded_routes) and encoded_routes[i + 1] == 1:
+                # If it's a separator (1), add the current group to the result and start a new group
+                decoded_routes.append(current_group)
+                current_group = []
+
+        # Append the last group if it's non-empty
+        if current_group:
+            decoded_routes.append(current_group)
+
+        return decoded_routes
+
+
+class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
     def __init__(
         self,
         number_of_ndp_customer: int,
@@ -457,8 +609,8 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             normalize=True
         )
 
-        xl: np.array = self.calculate_x_lower_bound()
-        xu: np.array = self.calculate_x_upper_bound()
+        xl: np.array = self.calculate_x_lower_bound(self.number_of_ndp_customer)
+        xu: np.array = self.calculate_x_upper_bound(self.number_of_ndp_customer)
 
         # Define problem
         super().__init__(
@@ -469,9 +621,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
         number_of_truck = np.round(x[1::2]).astype(int).sum()
         encoded_routes = x
 
-        # Convert to integer permutation
-        encoded_routes[0::2] = np.argsort(encoded_routes[0::2]) + 1
-
         decoded_routes = self.decode_route(encoded_routes)
 
         # Objective 1: Maximum distance traveled by any truck (normalized)
@@ -481,8 +630,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
 
         # Objective 2: Minimize the number of trucks used (normalized)
         f2 = number_of_truck / self.number_of_ndp_customer
-
-        # print(f"{f1} \t {f2}")
 
         out["F"] = np.array([f1, f2])
 
@@ -524,94 +671,106 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem):
             pass
             # self.map_graph.add_road("Depot", "NDP_1")
 
-    def calculate_x_lower_bound(self) -> np.array:
-        lower_bound = np.zeros(self.number_of_ndp_customer * 2, dtype=int)
-
-        # Set 1 at all even indices (customer)
-        lower_bound[0::2] = 1
-
-        # Set 0 at all odd indices (flag indicate boundary of a route)
-        lower_bound[1::2] = 0
-
-        return lower_bound
-
-    def calculate_x_upper_bound(self) -> np.array:
-        upper_bound = np.zeros(self.number_of_ndp_customer * 2, dtype=int)
-
-        # Set number of NDP customers at all even indices (customer)
-        upper_bound[0::2] = self.number_of_ndp_customer
-
-        # Set 1 at all odd indices (flag indicate boundary of a route)
-        upper_bound[1::2] = 1
-
-        # Last flag always is 1
-        upper_bound[-1] = 1
-
-        return upper_bound
-
-    def decode_route(self, encoded_routes: np.array):
-        """
-        Decode routes.
-
-        Args:
-            encoded_routes (): [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1]
-
-        Returns:
-            decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
-        """
-        decoded_routes: List = []
-        current_group: List = []
-
-        for i in range(0, len(encoded_routes), 2):
-            # Append the even-index element to the current group
-            current_group.append(encoded_routes[i])
-
-            # Check if the next odd-index element is 1
-            if i + 1 < len(encoded_routes) and encoded_routes[i + 1] == 1:
-                # If it's a separator (1), add the current group to the result and start a new group
-                decoded_routes.append(current_group)
-                current_group = []
-
-        # Append the last group if it's non-empty
-        if current_group:
-            decoded_routes.append(current_group)
-
-        return decoded_routes
-
-    def calculate_max_distance_among_trucks(
-        self,
-        matrix_distance: np.ndarray,
-        decoded_routes: List[List[int]],
-    ) -> float:
-        # Convert values of decoded_routes to int
-        decoded_routes = [
-            [int(value) for value in sublist] for sublist in decoded_routes
-        ]
-
-        # Initialize max distance
-        max_distance_among_trucks = 0
-
-        # Calculate the maximum distance for each truck's route and update max_distance_among_trucks
-        for route in decoded_routes:
-            # Calculate the distance from the depot to the first customer
-            route_distance = matrix_distance[0, route[0]]
-
-            # Calculate total distance for this truck route
-            route_distance += sum(
-                matrix_distance[route[i], route[i + 1]] for i in range(len(route) - 1)
-            )
-
-            # Calculate the distance from the last customer to the depot
-            route_distance += matrix_distance[route[-1], 0]
-
-            # Update max_distance_among_trucks if this route's distance is larger
-            max_distance_among_trucks = max(max_distance_among_trucks, route_distance)
-
-        return max_distance_among_trucks
+    def get_map_graph(self):
+        return self.map_graph
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
 
+        self.map_graph.compose_visualization_coordinates()
+        self.map_graph.compose_visualization_roads()
+        self.map_graph.visualize()
+
+
+class SolutionHandler(Helper):
+    def __init__(self, map_graph: MapGraph):
+        self.map_graph: MapGraph = map_graph
+        self.result = None
+
+    def set_result(self, result):
+        self.result = copy.deepcopy(result)
+
+    def _validate_number_of_solution_value(self, index_of_solution):
+        if not self.result:
+            raise ValueError("No solution found.")
+
+        try:
+            _ = self.result.X[index_of_solution]
+        except:
+            raise ValueError(f"'index_of_solution' is not valid.")
+
+    def get_best_solutions(self, number_of_solutions: int = 1):
+        self._validate_number_of_solution_value(number_of_solutions)
+
+        best_solutions = copy.deepcopy(self.result.X[:number_of_solutions])
+
+        for solution in best_solutions:
+            solution[0::2] = np.argsort(solution[0::2]) + 1
+            solution[1::2] = np.round(solution[1::2])
+
+        best_solutions = best_solutions.astype(int).tolist()
+
+        return best_solutions
+
+    def get_best_f(self, number_of_f: int = 1):
+        self._validate_number_of_solution_value(number_of_f)
+
+        best_f = copy.deepcopy(self.result.F[:number_of_f])
+
+        return best_f
+
+    def print_best_solutions(self, number_of_solutions: int = 1):
+        encoded_solution_list = self.get_best_solutions(number_of_solutions)
+        f_list = self.get_best_f(number_of_solutions)
+
+        for index in range(len(encoded_solution_list)):
+            decoded_solution = self.decode_route(encoded_solution_list[index])
+            print()
+            print(f"SOLUTION {index}")
+            print(f"{decoded_solution}")
+            print(
+                f"- Maximum length among trucks: {self.map_graph.rescale_distance(f_list[index][0])}"
+            )
+            print(
+                f"- Number of trucks used: {self.map_graph.rescale_number_of_trucks(f_list[index][1])}"
+            )
+
+    def visualize_solution(self, index_of_solution: int = 0):
+        self._validate_number_of_solution_value(index_of_solution)
+
+        encoded_solution: np.array = self.result.X[index_of_solution]
+
+        route_list: List[List[int]] = self.decode_route(encoded_solution)
+
+        # Add roads
+        coordinate_list = self.map_graph.coordinate_list
+        depot = coordinate_list[0]
+
+        for route_index in range(len(route_list)):
+            color = ROUTE_COLORS[route_index]
+            self.map_graph.add_road(
+                start=depot,
+                end=coordinate_list[route_list[route_index][0]],
+                width=2,
+                color=color,
+            )
+
+            for index in range(len(route_list[route_index]) - 1):
+                self.map_graph.add_road(
+                    coordinate_list[route_list[route_index][index]],
+                    coordinate_list[route_list[route_index][index + 1]],
+                    width=2,
+                    color=color,
+                )
+
+            self.map_graph.add_road(
+                coordinate_list[route_list[route_index][-1]],
+                depot,
+                width=2,
+                color=color,
+            )
+
+        plt.figure(figsize=FIG_SIZE)
         self.map_graph.compose_visualization_coordinates()
         self.map_graph.compose_visualization_roads()
         self.map_graph.visualize()
@@ -637,11 +796,11 @@ def main():
     # Run the optimization
     res = minimize(problem, algorithm, ("n_gen", 200), verbose=True)
 
-    best_solution: np.array = res.X[0]
-    best_solution[0::2] = np.argsort(best_solution[0::2]) + 1
-    best_solution[1::2] = np.round(best_solution[1::2])
-    print(best_solution.astype(int).tolist())
-    print(res.F[0])
+    # Create solution handler
+    solution_handler = SolutionHandler(problem.get_map_graph())
+    solution_handler.set_result(res)
+    solution_handler.print_best_solutions(5)
+    solution_handler.visualize_solution()
 
 
 if __name__ == "__main__":
