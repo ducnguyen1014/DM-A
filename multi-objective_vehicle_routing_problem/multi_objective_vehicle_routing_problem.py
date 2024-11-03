@@ -468,29 +468,58 @@ class CustomRandomSampling(Sampling):
             isinstance(problem, HDP_MultiObjectiveVehicleRoutingProblem)
             and problem.ndp_solution
         ):
-            return problem.ndp_solution
+            initial_ndp_solutions = problem.ndp_solution
+
+            gap_in_number_of_customers = (
+                problem.number_of_hdp_customer - problem.number_of_ndp_customer
+            )
+
+            for index in range(len(initial_ndp_solutions)):
+                initial_ndp_solutions[index] = (
+                    initial_ndp_solutions[index] + [0] * gap_in_number_of_customers * 2
+                )
+
+                permutation = (
+                    np.random.permutation(gap_in_number_of_customers)
+                    + gap_in_number_of_customers
+                    + 1
+                )
+
+                initial_ndp_solutions[index][
+                    problem.number_of_ndp_customer * 2 :: 2
+                ] = permutation
+                initial_ndp_solutions[index][
+                    problem.number_of_ndp_customer * 2 + 1 :: 2
+                ] = np.random.choice(
+                    [0, 1],
+                    size=problem.number_of_ndp_customer,
+                )
+                initial_ndp_solutions[index][-1] = 1
+
+            return initial_ndp_solutions
 
         # Case 2: The following code is for NDP problem and HDP problem that does not has NDP solutions
-        X = []  # Start with an empty list to hold samples
+        else:
+            X = []  # Start with an empty list to hold samples
 
-        # Generate random permutations for each sample
-        for _ in range(n_samples):
-            # Create a random permutation of customer indices
-            permutation = np.random.permutation(self.number_of_customer) + 1
+            # Generate random permutations for each sample
+            for _ in range(n_samples):
+                # Create a random permutation of customer indices
+                permutation = np.random.permutation(self.number_of_customer) + 1
 
-            # Insert zero after each element in the permutation
-            sample = np.ones(2 * self.number_of_customer, dtype=int)
+                # Insert zero after each element in the permutation
+                sample = np.ones(2 * self.number_of_customer, dtype=int)
 
-            # Set customer indices at even positions
-            sample[0::2] = permutation
-            sample[1::2] = np.random.choice([0, 1], size=sample[1::2].shape)
-            # sample[1::2] = 1
-            sample[-1] = 1
+                # Set customer indices at even positions
+                sample[0::2] = permutation
+                sample[1::2] = np.random.choice([0, 1], size=sample[1::2].shape)
+                # sample[1::2] = 1
+                sample[-1] = 1
 
-            # Add the generated sample to the list
-            X.append(sample)
+                # Add the generated sample to the list
+                X.append(sample)
 
-        return X
+            return X
 
 
 class Helper:
@@ -605,7 +634,7 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
         self.ndp_customer_list: list[NDP_Customer] = []
 
-        print("\nNDP_MultiObjectiveVehicleRoutingProblem\n")
+        print("\n\nNDP_MultiObjectiveVehicleRoutingProblem")
 
         # Define map
         self.define_map()
@@ -691,25 +720,27 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
     def __init__(
         self,
+        number_of_ndp_customer: int,
         number_of_hdp_customer: int,
         range_of_hdp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
         map_graph: MapGraph,
         ndp_solution: np.array = None,
     ):
-        if number_of_hdp_customer <= NUMBER_OF_NDP_CUSTOMER:
+        if number_of_hdp_customer <= number_of_ndp_customer:
             raise ValueError(
-                f"'number_of_hdp_customer' ({number_of_hdp_customer}) must be greater than NUMBER_OF_NDP_CUSTOMER ({NUMBER_OF_NDP_CUSTOMER})"
+                f"'number_of_hdp_customer' ({number_of_hdp_customer}) must be greater than NUMBER_OF_NDP_CUSTOMER ({number_of_ndp_customer})"
             )
 
+        self.number_of_ndp_customer = number_of_ndp_customer
         self.number_of_hdp_customer = number_of_hdp_customer
         self.range_of_hdp_customer = range_of_hdp_customer
         self.map_graph = map_graph
         if ndp_solution:
             self.ndp_solution = copy.deepcopy(ndp_solution)
-            print("\nDependent HDP_MultiObjectiveVehicleRoutingProblem\n")
+            print("\n\nDependent HDP_MultiObjectiveVehicleRoutingProblem")
         else:
             self.ndp_solution = None
-            print("\nIndependent HDP_MultiObjectiveVehicleRoutingProblem\n")
+            print("\n\nIndependent HDP_MultiObjectiveVehicleRoutingProblem")
 
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
         self.hdp_customer_list: list[HDP_Customer] = []
@@ -914,10 +945,11 @@ def main():
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
     ndp_solution_handler.print_best_solutions(5)
-    # solution_handler.visualize_solution()
+    ndp_solution_handler.visualize_solution()
 
     # HDP problem without solution from NDP (independent HDP problem)
     ind_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
+        number_of_ndp_customer=NUMBER_OF_NDP_CUSTOMER,
         number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
         range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
         map_graph=ndp_problem.get_map_graph(),
@@ -943,10 +975,11 @@ def main():
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
     ind_hdp_solution_handler.print_best_solutions(5)
-    # solution_handler.visualize_solution()
+    ind_hdp_solution_handler.visualize_solution()
 
     # HDP problem with initial NDP solutions
     dep_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
+        number_of_ndp_customer=NUMBER_OF_NDP_CUSTOMER,
         number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
         range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
         map_graph=ndp_problem.get_map_graph(),
@@ -973,7 +1006,7 @@ def main():
     dep_hdp_solution_handler = SolutionHandler(dep_hdp_problem.get_map_graph())
     dep_hdp_solution_handler.set_result(dep_hdp_res)
     dep_hdp_solution_handler.print_best_solutions(5)
-    # solution_handler.visualize_solution()
+    dep_hdp_solution_handler.visualize_solution()
 
 
 if __name__ == "__main__":
