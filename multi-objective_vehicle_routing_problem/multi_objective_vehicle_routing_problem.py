@@ -425,10 +425,15 @@ class MapGraph:
             )
             self.unique_label.append("Road")
 
-    def visualize(self):
+    def visualize(self, graph_title: str = None):
         plt.xlabel("Latitude")
         plt.ylabel("Longitude")
-        plt.title(f"Map Graph Visualization - Map: {SEED}")
+
+        if graph_title:
+            plt.title(f"Map Graph Visualization - {graph_title} - Map: {SEED}")
+        else:
+            plt.title(f"Map Graph Visualization - Map: {SEED}")
+
         plt.legend(loc="upper left")
         plt.xlim(RANGE_OF_MAP[0])
         plt.ylim(RANGE_OF_MAP[1])
@@ -879,7 +884,7 @@ class SolutionHandler(Helper):
                 f"- Number of trucks used: {self.map_graph.rescale_number_of_trucks(f_list[index][1])}"
             )
 
-    def visualize_solution(self, index_of_solution: int = 0):
+    def visualize_solution(self, graph_title: str = None, index_of_solution: int = 0):
         self._validate_number_of_solution_value(index_of_solution)
 
         encoded_solution: np.array = self.result.X[index_of_solution]
@@ -917,7 +922,7 @@ class SolutionHandler(Helper):
         plt.figure(figsize=FIG_SIZE)
         self.map_graph.compose_visualization_coordinates()
         self.map_graph.compose_visualization_roads()
-        self.map_graph.visualize()
+        self.map_graph.visualize(graph_title)
 
 
 def main():
@@ -927,7 +932,7 @@ def main():
         range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
     )
 
-    # ndp_problem.visualize()
+    ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
         pop_size=300,
@@ -945,7 +950,7 @@ def main():
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
     ndp_solution_handler.print_best_solutions(5)
-    ndp_solution_handler.visualize_solution()
+    # ndp_solution_handler.visualize_solution("NDP problem")
 
     # HDP problem without solution from NDP (independent HDP problem)
     ind_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
@@ -955,7 +960,7 @@ def main():
         map_graph=ndp_problem.get_map_graph(),
     )
 
-    # hdp_problem.visualize()
+    ind_hdp_problem.visualize()
 
     ind_hdp_algorithm = NSGA2(
         pop_size=300,
@@ -975,7 +980,7 @@ def main():
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
     ind_hdp_solution_handler.print_best_solutions(5)
-    ind_hdp_solution_handler.visualize_solution()
+    # ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
 
     # HDP problem with initial NDP solutions
     dep_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
@@ -986,7 +991,7 @@ def main():
         ndp_solution=ndp_solution_handler.get_best_solutions(100),
     )
 
-    # hdp_problem.visualize()
+    dep_hdp_problem.visualize()
 
     dep_hdp_algorithm = NSGA2(
         pop_size=100,
@@ -1006,7 +1011,7 @@ def main():
     dep_hdp_solution_handler = SolutionHandler(dep_hdp_problem.get_map_graph())
     dep_hdp_solution_handler.set_result(dep_hdp_res)
     dep_hdp_solution_handler.print_best_solutions(5)
-    dep_hdp_solution_handler.visualize_solution()
+    # dep_hdp_solution_handler.visualize_solution("Dependent HDP problem")
 
 
 if __name__ == "__main__":
