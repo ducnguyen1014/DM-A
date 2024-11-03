@@ -738,12 +738,12 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         # If an HDP problem had created a map, reuse the existing
         if former_hdp_customer_list and initial_map_graph:
             self.map_graph = initial_map_graph
-            self.hdp_customer_list = former_hdp_customer_list
+            self.hdp_customer_list = copy.deepcopy(former_hdp_customer_list)
 
         # If this is the first HDP problem, need to define new HDP customers
         elif ndp_customer_list and initial_map_graph:
             self.map_graph = initial_map_graph
-            self.hdp_customer_list = ndp_customer_list
+            self.hdp_customer_list = copy.deepcopy(ndp_customer_list)
 
         else:
             raise ValueError("Need to define NDP customers and an initial map.")
@@ -797,7 +797,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         out["F"] = np.array([f1, f2])
 
     def define_map(self):
-        if len(self.map_graph.coordinate_list) == self.number_of_hdp_customer:
+        if len(self.map_graph.coordinate_list[1:]) == self.number_of_hdp_customer:
             return
 
         # Add HDP locations on a HDP map
@@ -836,6 +836,9 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 
     def get_map_graph(self):
         return self.map_graph
+
+    def get_hdp_customer_list(self):
+        return self.hdp_customer_list
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
@@ -946,10 +949,10 @@ def main():
         range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
     )
 
-    ndp_problem.visualize()
+    # ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
-        pop_size=300,
+        pop_size=1000,
         n_offsprings=20,
         sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
         crossover=SBX(prob=0.9, eta=15),
@@ -964,7 +967,7 @@ def main():
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
     ndp_solution_handler.print_best_solutions(5)
-    # ndp_solution_handler.visualize_solution("NDP problem")
+    ndp_solution_handler.visualize_solution("NDP problem")
 
     # HDP problem without solution from NDP (independent HDP problem)
     ind_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
@@ -974,10 +977,10 @@ def main():
         initial_map_graph=ndp_problem.get_map_graph(),
     )
 
-    ind_hdp_problem.visualize()
+    # ind_hdp_problem.visualize()
 
     ind_hdp_algorithm = NSGA2(
-        pop_size=300,
+        pop_size=1000,
         n_offsprings=20,
         sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
         crossover=SBX(prob=0.9, eta=15),
@@ -993,22 +996,26 @@ def main():
     # Create solution handler
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
+    ind_hdp_solution_handler.print_best_solutions(2)
     ind_hdp_solution_handler.print_best_solutions(5)
-    # ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
+    ind_hdp_solution_handler.print_best_solutions(2)
+    ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
+    ind_hdp_solution_handler.print_best_solutions(2)
 
     # HDP problem with initial NDP solutions
     dep_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
         ndp_customer_list=ndp_problem.get_ndp_customer_list(),
         number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
         range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
-        initial_map_graph=ndp_problem.get_map_graph(),
-        ndp_solution=ndp_solution_handler.get_best_solutions(100),
+        initial_map_graph=ind_hdp_problem.get_map_graph(),
+        ndp_solution=ndp_solution_handler.get_best_solutions(-1),
+        former_hdp_customer_list=ind_hdp_problem.get_hdp_customer_list(),
     )
 
-    dep_hdp_problem.visualize()
+    # dep_hdp_problem.visualize()
 
     dep_hdp_algorithm = NSGA2(
-        pop_size=100,
+        pop_size=len(ndp_solution_handler.get_best_solutions(-1)),
         n_offsprings=20,
         sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
         crossover=SBX(prob=0.9, eta=15),
@@ -1025,7 +1032,7 @@ def main():
     dep_hdp_solution_handler = SolutionHandler(dep_hdp_problem.get_map_graph())
     dep_hdp_solution_handler.set_result(dep_hdp_res)
     dep_hdp_solution_handler.print_best_solutions(5)
-    # dep_hdp_solution_handler.visualize_solution("Dependent HDP problem")
+    dep_hdp_solution_handler.visualize_solution("Dependent HDP problem")
 
 
 if __name__ == "__main__":
