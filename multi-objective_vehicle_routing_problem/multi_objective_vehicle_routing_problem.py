@@ -56,8 +56,6 @@ np.random.seed(SEED)
 # Plot settings
 ENABLE_COORDINATES = True
 ENABLE_ROADS = True
-ENABLE_NDP_CUSTOMERS = True
-ENABLE_HDP_CUSTOMERS = False
 
 ENABLE_GRID = True
 ENABLE_POINT_LABEL = True
@@ -86,7 +84,7 @@ DEFAULT_MARKER_SIZE_OF_NDP_CUSTOMER = 100
 
 # HDP customers
 HDP_CUSTOMER_NAME = "HDP"
-NUMBER_OF_HDP_CUSTOMER = 5
+NUMBER_OF_HDP_CUSTOMER = 10
 RANGE_OF_HDP_CUSTOMER = (
     (0, 200),
     (0, 100),
@@ -662,17 +660,98 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         self.map_graph.add_location(self.depot)
 
         # Add NDP customers
-        if ENABLE_NDP_CUSTOMERS:
-            for customer in self.ndp_customer_list:
-                self.map_graph.add_location(customer)
+        for customer in self.ndp_customer_list:
+            self.map_graph.add_location(customer)
 
         # Add Depot - NDP Customer roads
-        if ENABLE_NDP_CUSTOMERS:
-            pass
-            # self.map_graph.add_road("Depot", "NDP_1")
+        # self.map_graph.add_road("Depot", "NDP_1")
 
     def get_map_graph(self):
         return self.map_graph
+
+    def visualize(self):
+        plt.figure(figsize=FIG_SIZE)
+
+        self.map_graph.compose_visualization_coordinates()
+        self.map_graph.compose_visualization_roads()
+        self.map_graph.visualize()
+
+
+class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
+    def __init__(
+        self,
+        number_of_hdp_customer: int,
+        range_of_hdp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
+        map_graph: MapGraph,
+    ):
+        if number_of_hdp_customer <= NUMBER_OF_NDP_CUSTOMER:
+            raise ValueError(
+                f"'number_of_hdp_customer' ({number_of_hdp_customer}) must be greater than NUMBER_OF_NDP_CUSTOMER ({NUMBER_OF_NDP_CUSTOMER})"
+            )
+
+        self.number_of_hdp_customer = number_of_hdp_customer
+        self.range_of_hdp_customer = range_of_hdp_customer
+        self.map_graph = map_graph
+
+        self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
+        self.hdp_customer_list: list[HDP_Customer] = []
+
+        # Define map
+        self.define_map()
+
+        # Calculate distance between coordinates (matrix)
+        self.map_graph.calculate_distance_matrix()
+
+        # Normalize objective
+        self.normalized_distance_matrix = self.map_graph.get_distance_matrix(
+            normalize=True
+        )
+
+        xl: np.array = self.calculate_x_lower_bound(self.number_of_hdp_customer)
+        xu: np.array = self.calculate_x_upper_bound(self.number_of_hdp_customer)
+
+        # Define problem
+        super().__init__(
+            n_var=self.number_of_hdp_customer * 2, n_obj=2, n_constr=0, xl=xl, xu=xu
+        )
+
+    def _evaluate(self, x, out, *args, **kwargs):
+        return super()._evaluate(x, out, *args, **kwargs)
+
+    def define_map(self):
+        # Add HDP locations on a HDP map
+        for i in range(self.number_of_hdp_customer):
+            self.hdp_customer_list.append(
+                HDP_Customer(
+                    latitude=round(
+                        random.uniform(
+                            self.range_of_hdp_customer[0][0],
+                            self.range_of_hdp_customer[0][1],
+                        ),
+                        4,
+                    ),
+                    longitude=round(
+                        random.uniform(
+                            self.range_of_hdp_customer[1][0],
+                            self.range_of_hdp_customer[1][1],
+                        ),
+                        4,
+                    ),
+                    name=f"{HDP_CUSTOMER_NAME}_{i+1}",
+                )
+            )
+
+        self.map_graph = MapGraph()
+
+        # Add depot
+        self.map_graph.add_location(self.depot)
+
+        # Add HDP customers
+        for customer in self.hdp_customer_list:
+            self.map_graph.add_location(customer)
+
+        # Add Depot - HDP Customer roads
+        # self.map_graph.add_road("Depot", "HDP_1")
 
     def visualize(self):
         plt.figure(figsize=FIG_SIZE)
@@ -777,30 +856,38 @@ class SolutionHandler(Helper):
 
 
 def main():
-    problem = NDP_MultiObjectiveVehicleRoutingProblem(
+    ndp_problem = NDP_MultiObjectiveVehicleRoutingProblem(
         number_of_ndp_customer=NUMBER_OF_NDP_CUSTOMER,
         range_of_ndp_customer=RANGE_OF_NDP_CUSTOMER,
     )
 
-    # problem.visualize()
+    # ndp_problem.visualize()
 
-    algorithm = NSGA2(
-        pop_size=300,
-        n_offsprings=20,
-        sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
-        crossover=SBX(prob=0.9, eta=15),
-        mutation=PM(eta=20),
-        eliminate_duplicates=True,
+    # algorithm = NSGA2(
+    #     pop_size=300,
+    #     n_offsprings=20,
+    #     sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
+    #     crossover=SBX(prob=0.9, eta=15),
+    #     mutation=PM(eta=20),
+    #     eliminate_duplicates=True,
+    # )
+
+    # # Run the optimization
+    # res = minimize(ndp_problem, algorithm, ("n_gen", 200), verbose=True)
+
+    # # Create solution handler
+    # solution_handler = SolutionHandler(ndp_problem.get_map_graph())
+    # solution_handler.set_result(res)
+    # solution_handler.print_best_solutions(5)
+    # solution_handler.visualize_solution()
+
+    hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
+        number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
+        range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
+        map_graph=ndp_problem.get_map_graph(),
     )
 
-    # Run the optimization
-    res = minimize(problem, algorithm, ("n_gen", 200), verbose=True)
-
-    # Create solution handler
-    solution_handler = SolutionHandler(problem.get_map_graph())
-    solution_handler.set_result(res)
-    solution_handler.print_best_solutions(5)
-    solution_handler.visualize_solution()
+    hdp_problem.visualize()
 
 
 if __name__ == "__main__":
