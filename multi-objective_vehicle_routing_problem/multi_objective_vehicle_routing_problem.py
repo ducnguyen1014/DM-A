@@ -600,6 +600,7 @@ class Helper:
         Returns:
             decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
         """
+        encoded_routes = copy.deepcopy(encoded_routes)
         encoded_routes[0::2] = np.argsort(encoded_routes[0::2]) + 1
         try:
             encoded_routes = encoded_routes.astype(int)
@@ -996,11 +997,8 @@ def main():
     # Create solution handler
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
-    ind_hdp_solution_handler.print_best_solutions(2)
     ind_hdp_solution_handler.print_best_solutions(5)
-    ind_hdp_solution_handler.print_best_solutions(2)
     ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
-    ind_hdp_solution_handler.print_best_solutions(2)
 
     # HDP problem with initial NDP solutions
     dep_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
