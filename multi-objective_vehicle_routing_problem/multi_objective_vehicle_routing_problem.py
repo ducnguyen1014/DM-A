@@ -338,6 +338,9 @@ class MapGraph:
         self.add_location(start)
         self.add_location(end)
 
+    def clean_roads(self):
+        self.road_list = []
+
     def calculate_distance_matrix(self):
         # Extract latitudes and longitudes as NumPy arrays
         latitudes = np.array([coord.latitude for coord in self.coordinate_list])
@@ -471,18 +474,22 @@ class CustomRandomSampling(Sampling):
         # Case 1: If this is HDP problem and it has NDP solutions, then use those solutions.
         if (
             isinstance(problem, HDP_MultiObjectiveVehicleRoutingProblem)
-            and problem.ndp_solution
+            and isinstance(problem.ndp_solution, np.ndarray)
+            and problem.ndp_solution.shape[0] > 0
         ):
             initial_ndp_solutions = problem.ndp_solution
+            transformed_initial_ndp_solutions = np.zeros(
+                (problem.ndp_solution.shape[0], problem.ndp_solution.shape[1] * 2)
+            )
 
             gap_in_number_of_customers = problem.number_of_hdp_customer - len(
                 problem.ndp_customer_list
             )
 
-            for index in range(len(initial_ndp_solutions)):
-                initial_ndp_solutions[index] = (
-                    initial_ndp_solutions[index] + [0] * gap_in_number_of_customers * 2
-                )
+            for index in range(len(transformed_initial_ndp_solutions)):
+                transformed_initial_ndp_solutions[index][
+                    0 : problem.ndp_solution.shape[1]
+                ] = initial_ndp_solutions[index]
 
                 permutation = (
                     np.random.permutation(gap_in_number_of_customers)
@@ -490,18 +497,20 @@ class CustomRandomSampling(Sampling):
                     + 1
                 )
 
-                initial_ndp_solutions[index][
-                    len(problem.ndp_customer_list) * 2 :: 2
+                number_of_ndp_customer = len(problem.ndp_customer_list)
+
+                transformed_initial_ndp_solutions[index][
+                    number_of_ndp_customer * 2 :: 2
                 ] = permutation
-                initial_ndp_solutions[index][
-                    len(problem.ndp_customer_list) * 2 + 1 :: 2
+                transformed_initial_ndp_solutions[index][
+                    number_of_ndp_customer * 2 + 1 :: 2
                 ] = np.random.choice(
                     [0, 1],
-                    size=len(problem.ndp_customer_list),
+                    size=gap_in_number_of_customers,
                 )
-                initial_ndp_solutions[index][-1] = 1
+                transformed_initial_ndp_solutions[index][-1] = 1
 
-            return initial_ndp_solutions
+            return transformed_initial_ndp_solutions
 
         # Case 2: The following code is for NDP problem and HDP problem that does not has NDP solutions
         else:
@@ -601,7 +610,7 @@ class Helper:
             decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
         """
         encoded_routes = copy.deepcopy(encoded_routes)
-        encoded_routes[0::2] = np.argsort(encoded_routes[0::2]) + 1
+        encoded_routes[0::2] = np.argsort(np.argsort(encoded_routes[0::2])) + 1
         try:
             encoded_routes = encoded_routes.astype(int)
         except:
@@ -709,9 +718,6 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         for customer in self.ndp_customer_list:
             self.map_graph.add_location(customer)
 
-        # Add Depot - NDP Customer roads
-        # self.map_graph.add_road("Depot", "NDP_1")
-
     def get_map_graph(self):
         return self.map_graph
 
@@ -729,38 +735,23 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
     def __init__(
         self,
-        ndp_customer_list: List[NDP_Customer],
+        ndp_customer_list: List[Customer],
         number_of_hdp_customer: int,
         range_of_hdp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
-        initial_map_graph: MapGraph,
         ndp_solution: np.array = None,
-        former_hdp_customer_list: List[HDP_Customer] = [],
     ):
-        # If an HDP problem had created a map, reuse the existing
-        if former_hdp_customer_list and initial_map_graph:
-            self.map_graph = initial_map_graph
-            self.hdp_customer_list = copy.deepcopy(former_hdp_customer_list)
-
-        # If this is the first HDP problem, need to define new HDP customers
-        elif ndp_customer_list and initial_map_graph:
-            self.map_graph = initial_map_graph
-            self.hdp_customer_list = copy.deepcopy(ndp_customer_list)
-
-        else:
-            raise ValueError("Need to define NDP customers and an initial map.")
-
-        self.ndp_customer_list = ndp_customer_list
+        self.ndp_customer_list = copy.deepcopy(ndp_customer_list)
+        self.hdp_customer_list = copy.deepcopy(ndp_customer_list)
         self.number_of_hdp_customer = number_of_hdp_customer
         self.range_of_hdp_customer = range_of_hdp_customer
+        self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
 
-        if ndp_solution:
+        if isinstance(ndp_solution, np.ndarray) and ndp_solution.shape[0] > 0:
             self.ndp_solution = copy.deepcopy(ndp_solution)
             print("\n\nDependent HDP_MultiObjectiveVehicleRoutingProblem")
         else:
             self.ndp_solution = None
             print("\n\nIndependent HDP_MultiObjectiveVehicleRoutingProblem")
-
-        self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
 
         # Define map
         self.define_map()
@@ -798,30 +789,28 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         out["F"] = np.array([f1, f2])
 
     def define_map(self):
-        if len(self.map_graph.coordinate_list[1:]) == self.number_of_hdp_customer:
-            return
-
-        # Add HDP locations on a HDP map
-        for i in range(self.number_of_hdp_customer - len(self.ndp_customer_list)):
-            self.hdp_customer_list.append(
-                HDP_Customer(
-                    latitude=round(
-                        random.uniform(
-                            self.range_of_hdp_customer[0][0],
-                            self.range_of_hdp_customer[0][1],
+        if len(self.hdp_customer_list) < self.number_of_hdp_customer:
+            # Add HDP customers
+            for i in range(self.number_of_hdp_customer - len(self.ndp_customer_list)):
+                self.hdp_customer_list.append(
+                    HDP_Customer(
+                        latitude=round(
+                            random.uniform(
+                                self.range_of_hdp_customer[0][0],
+                                self.range_of_hdp_customer[0][1],
+                            ),
+                            4,
                         ),
-                        4,
-                    ),
-                    longitude=round(
-                        random.uniform(
-                            self.range_of_hdp_customer[1][0],
-                            self.range_of_hdp_customer[1][1],
+                        longitude=round(
+                            random.uniform(
+                                self.range_of_hdp_customer[1][0],
+                                self.range_of_hdp_customer[1][1],
+                            ),
+                            4,
                         ),
-                        4,
-                    ),
-                    name=f"{HDP_CUSTOMER_NAME}_{i+1}",
+                        name=f"{HDP_CUSTOMER_NAME}_{i+1}",
+                    )
                 )
-            )
 
         self.map_graph = MapGraph()
 
@@ -831,9 +820,6 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         # Add HDP customers
         for customer in self.hdp_customer_list:
             self.map_graph.add_location(customer)
-
-        # Add Depot - HDP Customer roads
-        # self.map_graph.add_road("Depot", "HDP_1")
 
     def get_map_graph(self):
         return self.map_graph
@@ -862,25 +848,38 @@ class SolutionHandler(Helper):
             raise ValueError("No solution found.")
 
         try:
+            if (
+                isinstance(index_of_solution, float)
+                and index_of_solution > 0
+                and index_of_solution < 1
+            ):
+                index_of_solution = int(len(self.result.X) * index_of_solution)
+
             _ = self.result.X[index_of_solution]
+
+            return index_of_solution
         except:
             raise ValueError(f"'index_of_solution' is not valid.")
 
-    def get_best_solutions(self, number_of_solutions: int = 1):
-        self._validate_number_of_solution_value(number_of_solutions)
+    def get_best_solutions(self, number_of_solutions: int | float = 1):
+        number_of_solutions = self._validate_number_of_solution_value(
+            number_of_solutions
+        )
 
-        best_solutions = copy.deepcopy(self.result.X[:number_of_solutions])
+        best_encoded_solutions = copy.deepcopy(self.result.X[:number_of_solutions])
+        result = np.zeros_like(best_encoded_solutions, dtype=int)
 
-        for solution in best_solutions:
-            solution[0::2] = np.argsort(solution[0::2]) + 1
-            solution[1::2] = np.round(solution[1::2])
+        for index in range(len(best_encoded_solutions)):
+            result[index][0::2] = (
+                np.argsort(np.argsort(best_encoded_solutions[index][0::2])) + 1
+            )
 
-        best_solutions = best_solutions.astype(int).tolist()
+            result[index][1::2] = np.round(best_encoded_solutions[index][1::2])
 
-        return best_solutions
+        return result
 
     def get_best_f(self, number_of_f: int = 1):
-        self._validate_number_of_solution_value(number_of_f)
+        number_of_f = self._validate_number_of_solution_value(number_of_f)
 
         best_f = copy.deepcopy(self.result.F[:number_of_f])
 
@@ -891,10 +890,12 @@ class SolutionHandler(Helper):
         f_list = self.get_best_f(number_of_solutions)
 
         for index in range(len(encoded_solution_list)):
-            decoded_solution = self.decode_route(encoded_solution_list[index])
+            solution = copy.deepcopy(encoded_solution_list[index])
+            solution = self.decode_route(solution)
+
             print()
             print(f"SOLUTION {index}")
-            print(f"{decoded_solution}")
+            print(f"{solution}")
             print(
                 f"- Maximum length among trucks: {self.map_graph.rescale_distance(f_list[index][0])}"
             )
@@ -910,6 +911,7 @@ class SolutionHandler(Helper):
         route_list: List[List[int]] = self.decode_route(encoded_solution)
 
         # Add roads
+        self.map_graph.clean_roads()
         coordinate_list = self.map_graph.coordinate_list
         depot = coordinate_list[0]
 
@@ -967,7 +969,7 @@ def main():
     # Create solution handler
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
-    ndp_solution_handler.print_best_solutions(5)
+    ndp_solution_handler.print_best_solutions()
     ndp_solution_handler.visualize_solution("NDP problem")
 
     # HDP problem without solution from NDP (independent HDP problem)
@@ -975,7 +977,6 @@ def main():
         ndp_customer_list=ndp_problem.get_ndp_customer_list(),
         number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
         range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
-        initial_map_graph=ndp_problem.get_map_graph(),
     )
 
     # ind_hdp_problem.visualize()
@@ -997,7 +998,7 @@ def main():
     # Create solution handler
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
-    ind_hdp_solution_handler.print_best_solutions(5)
+    ind_hdp_solution_handler.print_best_solutions()
     ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
 
     # HDP problem with initial NDP solutions
@@ -1005,9 +1006,7 @@ def main():
         ndp_customer_list=ndp_problem.get_ndp_customer_list(),
         number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
         range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
-        initial_map_graph=ind_hdp_problem.get_map_graph(),
-        ndp_solution=ndp_solution_handler.get_best_solutions(-1),
-        former_hdp_customer_list=ind_hdp_problem.get_hdp_customer_list(),
+        ndp_solution=ndp_solution_handler.get_best_solutions(1 / 3),
     )
 
     # dep_hdp_problem.visualize()
@@ -1029,7 +1028,7 @@ def main():
     # Create solution handler
     dep_hdp_solution_handler = SolutionHandler(dep_hdp_problem.get_map_graph())
     dep_hdp_solution_handler.set_result(dep_hdp_res)
-    dep_hdp_solution_handler.print_best_solutions(5)
+    dep_hdp_solution_handler.print_best_solutions()
     dep_hdp_solution_handler.visualize_solution("Dependent HDP problem")
 
 
