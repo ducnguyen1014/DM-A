@@ -470,6 +470,35 @@ class CustomRandomSampling(Sampling):
         self.number_of_truck = number_of_customer
         self.number_of_customer = number_of_customer
 
+    def _insert_pairs_randomly(self, input_array, new_array):
+        # Convert input array to pairs
+        input_pairs = [
+            (input_array[i], input_array[i + 1]) for i in range(0, len(input_array), 2)
+        ]
+        new_pairs = [
+            (new_array[i], new_array[i + 1]) for i in range(0, len(new_array), 2)
+        ]
+
+        # Randomly shuffle the new pairs
+        random.shuffle(new_pairs)
+
+        # Insert each new pair into a random position in the original list
+        for pair in new_pairs:
+            insert_position = random.randint(
+                0, len(input_pairs)
+            )  # Allow insertion at the start, middle, or end
+            input_pairs.insert(insert_position, pair)
+
+        # Flatten the list back to a single array
+        result = [item for pair in input_pairs for item in pair]
+        return result
+
+    def _add_zero_after_each_element(self, input_list):
+        result = []
+        for item in input_list:
+            result.extend([item, 0])
+        return result
+
     def _do(self, problem, n_samples, **kwargs):
         # Case 1: If this is HDP problem and it has NDP solutions, then use those solutions.
         if (
@@ -478,37 +507,32 @@ class CustomRandomSampling(Sampling):
             and problem.ndp_solution.shape[0] > 0
         ):
             initial_ndp_solutions = problem.ndp_solution
-            transformed_initial_ndp_solutions = np.zeros(
-                (problem.ndp_solution.shape[0], problem.ndp_solution.shape[1] * 2)
-            )
+            transformed_initial_ndp_solutions = []
 
             gap_in_number_of_customers = problem.number_of_hdp_customer - len(
                 problem.ndp_customer_list
             )
 
-            for index in range(len(transformed_initial_ndp_solutions)):
-                transformed_initial_ndp_solutions[index][
-                    0 : problem.ndp_solution.shape[1]
-                ] = initial_ndp_solutions[index]
-
+            for index in range(len(initial_ndp_solutions)):
+                # Create a new permutation of customers
                 permutation = (
                     np.random.permutation(gap_in_number_of_customers)
                     + gap_in_number_of_customers
                     + 1
                 )
 
-                number_of_ndp_customer = len(problem.ndp_customer_list)
+                # Create a encoded array of new customers
+                new_array = self._add_zero_after_each_element(permutation)
 
-                transformed_initial_ndp_solutions[index][
-                    number_of_ndp_customer * 2 :: 2
-                ] = permutation
-                transformed_initial_ndp_solutions[index][
-                    number_of_ndp_customer * 2 + 1 :: 2
-                ] = np.random.choice(
-                    [0, 1],
-                    size=gap_in_number_of_customers,
+                # Create new sample from NDP solution and encoded array of new customers
+                new_sample = self._insert_pairs_randomly(
+                    initial_ndp_solutions[index], new_array
                 )
-                transformed_initial_ndp_solutions[index][-1] = 1
+
+                # Ensure the last flag is 1
+                new_sample[-1] = 1
+
+                transformed_initial_ndp_solutions.append(new_sample)
 
             return transformed_initial_ndp_solutions
 
@@ -999,7 +1023,7 @@ def main():
     ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
     ind_hdp_solution_handler.set_result(ind_hdp_res)
     ind_hdp_solution_handler.print_best_solutions()
-    ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
+    # ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
 
     # HDP problem with initial NDP solutions
     dep_hdp_problem = HDP_MultiObjectiveVehicleRoutingProblem(
