@@ -589,6 +589,38 @@ class Helper:
 
         return max_distance_among_trucks
 
+
+    @staticmethod
+    def calculate_similarity(
+        matrix_distance: np.ndarray,
+        decoded_routes: List[List[int]],
+    ) -> float:
+        # Convert values of decoded_routes to int
+        decoded_routes = [
+            [int(value) for value in sublist] for sublist in decoded_routes
+        ]
+
+        # Initialize max distance
+        max_distance_among_trucks = 0
+
+        # Calculate the maximum distance for each truck's route and update max_distance_among_trucks
+        for route in decoded_routes:
+            # Calculate the distance from the depot to the first customer
+            route_distance = matrix_distance[0, route[0]]
+
+            # Calculate total distance for this truck route
+            route_distance += sum(
+                matrix_distance[route[i], route[i + 1]] for i in range(len(route) - 1)
+            )
+
+            # Calculate the distance from the last customer to the depot
+            route_distance += matrix_distance[route[-1], 0]
+
+            # Update max_distance_among_trucks if this route's distance is larger
+            max_distance_among_trucks = max(max_distance_among_trucks, route_distance)
+
+        return max_distance_among_trucks
+
     @staticmethod
     def decode_route(encoded_routes: np.array):
         """
