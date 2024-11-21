@@ -4,6 +4,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.optimize import minimize
+from pymoo.core.result import Result
 
 from typing import List, Tuple
 import numpy as np
@@ -52,6 +53,9 @@ SEED = 30
 random.seed(SEED)
 np.random.seed(SEED)
 
+ENABLE_IND_HDP_PROBLEM = True
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
+ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
 
 # Plot settings
 ENABLE_COORDINATES = True
@@ -60,6 +64,8 @@ ENABLE_ROADS = True
 ENABLE_GRID = True
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
+
+ENABLE_SOLUTION_VISUALIZATION = True
 
 
 # Depot - This problem contains only one depot
@@ -695,6 +701,43 @@ class Helper:
 
         return output
 
+    @staticmethod
+    def calculate_similarity_between_flatted_routes(
+        flatted_route_1: List[set[int, int]],
+        flatted_route_2: List[set[int, int]],
+        weight_coefficient: float = 1.0,
+    ):
+
+        if weight_coefficient == 0:
+            raise ValueError("Cannot divide by zero")
+
+        similarity = (
+            len(
+                set(map(frozenset, flatted_route_1))
+                & set(map(frozenset, flatted_route_2))
+            )
+            / weight_coefficient
+        )
+
+        return similarity
+
+    @staticmethod
+    def calculate_similarity_between_encoded_routes(
+        encoded_route_1: List[int],
+        encoded_route_2: List[int],
+        weight_coefficient: float = 1.0,
+    ):
+
+        if weight_coefficient == 0:
+            raise ValueError("Cannot divide by zero")
+
+        flatted_route_1 = Helper.flatten_encoded_route(encoded_route_1)
+        flatted_route_2 = Helper.flatten_encoded_route(encoded_route_2)
+
+        return Helper.calculate_similarity_between_flatted_routes(
+            flatted_route_1, flatted_route_2, len(flatted_route_2)
+        )
+
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
     def __init__(
@@ -870,7 +913,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
             and self.ndp_solutions.shape[0] > 0
             and self.optimize_similality
         ):
-            f3 = self.calculate_similarity_between_ndp_and_hdp_solution(x)
+            f3 = -1 * self.calculate_similarity_between_ndp_and_hdp_solution(x)
             self.sample_count += 1
 
             out["F"] = np.array([f1, f2, f3])
@@ -916,10 +959,9 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         flatten_hdp_solution = self.flatten_encoded_route(hdp_solution)
 
         for flatten_ndp_solution in self.flatten_ndp_solutions:
-            similarity = len(
-                set(map(frozenset, flatten_hdp_solution))
-                & set(map(frozenset, flatten_ndp_solution))
-            ) / len(flatten_ndp_solution)
+            similarity = self.calculate_similarity_between_flatted_routes(
+                flatten_hdp_solution, flatten_ndp_solution, len(flatten_ndp_solution)
+            )
             output = max(output, similarity)
 
         return output
@@ -941,9 +983,9 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 class SolutionHandler(Helper):
     def __init__(self, map_graph: MapGraph):
         self.map_graph: MapGraph = map_graph
-        self.result = None
+        self.result: Result = None
 
-    def set_result(self, result):
+    def set_result(self, result: Result):
         self.result = copy.deepcopy(result)
 
     def _validate_number_of_solution_value(self, index_of_solution):
@@ -963,6 +1005,15 @@ class SolutionHandler(Helper):
             return index_of_solution
         except:
             raise ValueError(f"'index_of_solution' is not valid.")
+
+    def get_best_encoded_solutions(self, number_of_solutions: int | float = None):
+        if not number_of_solutions:
+            return copy.deepcopy(self.result.X)
+        else:
+            number_of_solutions = self._validate_number_of_solution_value(
+                number_of_solutions
+            )
+            return copy.deepcopy(self.result.X[:number_of_solutions])
 
     def get_best_solutions(self, number_of_solutions: int | float = None):
         if not number_of_solutions:
@@ -1009,6 +1060,18 @@ class SolutionHandler(Helper):
                 f"- Number of trucks used: {self.map_graph.rescale_number_of_trucks(f_list[index][1])}"
             )
 
+    def print_similarity(
+        self,
+        encoded_hdp_solution: List[int],
+        encoded_ndp_solution: List[int],
+    ):
+        similarity = self.calculate_similarity_between_encoded_routes(
+            encoded_route_1=encoded_hdp_solution,
+            encoded_route_2=encoded_ndp_solution,
+            weight_coefficient=len(encoded_ndp_solution),
+        )
+        print(f"Similarity: {similarity}")
+
     def visualize_solution(self, graph_title: str = None, index_of_solution: int = 0):
         self._validate_number_of_solution_value(index_of_solution)
 
@@ -1052,10 +1115,6 @@ class SolutionHandler(Helper):
 
 
 def main():
-    ENABLE_IND_HDP_PROBLEM = False
-    ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
-    ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
-
     """
     NDP problem
     """
@@ -1067,7 +1126,7 @@ def main():
     # ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
-        pop_size=1000,
+        pop_size=2000,
         n_offsprings=20,
         sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
         crossover=SBX(prob=0.9, eta=15),
@@ -1082,7 +1141,8 @@ def main():
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
     ndp_solution_handler.print_best_solutions(1)
-    # ndp_solution_handler.visualize_solution("NDP problem")
+    if ENABLE_SOLUTION_VISUALIZATION:
+        ndp_solution_handler.visualize_solution("NDP problem")
 
     """
     HDP problem without solution from NDP (independent HDP problem)
@@ -1114,7 +1174,16 @@ def main():
         ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
         ind_hdp_solution_handler.set_result(ind_hdp_res)
         ind_hdp_solution_handler.print_best_solutions(1)
-        # ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
+
+        if ENABLE_SOLUTION_VISUALIZATION:
+            ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
+
+        ind_hdp_solution_handler.print_similarity(
+            encoded_hdp_solution=ind_hdp_solution_handler.get_best_encoded_solutions(1)[
+                0
+            ],
+            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+        )
 
     """
     HDP problem with initial NDP solutions (2 objectives)
@@ -1150,8 +1219,17 @@ def main():
         )
         dep_hdp_solution_handler_2o.set_result(dep_hdp_res_2o)
         dep_hdp_solution_handler_2o.print_best_solutions(1)
-        dep_hdp_solution_handler_2o.visualize_solution(
-            "Dependent HDP problem - 2 objectives"
+
+        if ENABLE_SOLUTION_VISUALIZATION:
+            dep_hdp_solution_handler_2o.visualize_solution(
+                "Dependent HDP problem - 2 objectives"
+            )
+
+        dep_hdp_solution_handler_2o.print_similarity(
+            encoded_hdp_solution=dep_hdp_solution_handler_2o.get_best_encoded_solutions(
+                1
+            )[0],
+            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
         )
 
     if ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE:
@@ -1185,8 +1263,17 @@ def main():
         )
         dep_hdp_solution_handler_3o.set_result(dep_hdp_res_3o)
         dep_hdp_solution_handler_3o.print_best_solutions(1)
-        dep_hdp_solution_handler_3o.visualize_solution(
-            "Dependent HDP problem - 3 objectives"
+
+        if ENABLE_SOLUTION_VISUALIZATION:
+            dep_hdp_solution_handler_3o.visualize_solution(
+                "Dependent HDP problem - 3 objectives"
+            )
+
+        dep_hdp_solution_handler_3o.print_similarity(
+            encoded_hdp_solution=dep_hdp_solution_handler_3o.get_best_encoded_solutions(
+                1
+            )[0],
+            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
         )
 
 
