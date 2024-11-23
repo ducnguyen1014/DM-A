@@ -65,7 +65,7 @@ ENABLE_GRID = True
 ENABLE_POINT_LABEL = True
 FIG_SIZE = (16, 8)
 
-ENABLE_SOLUTION_VISUALIZATION = True
+ENABLE_SOLUTION_VISUALIZATION = False
 
 
 # Depot - This problem contains only one depot
@@ -914,7 +914,10 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
 
-        if isinstance(ndp_encoded_solutions, np.ndarray) and ndp_encoded_solutions.shape[0] > 0:
+        if (
+            isinstance(ndp_encoded_solutions, np.ndarray)
+            and ndp_encoded_solutions.shape[0] > 0
+        ):
             self.ndp_encoded_solutions = copy.deepcopy(ndp_encoded_solutions)
 
             if optimize_similality:
@@ -1044,7 +1047,9 @@ class SolutionHandler(Helper):
         self, all_encoded_ndp_encoded_solutions: List[List[int]]
     ):
         all_encoded_hdp_solutions = copy.deepcopy(self.get_best_encoded_solutions())
-        all_encoded_ndp_encoded_solutions = copy.deepcopy(all_encoded_ndp_encoded_solutions)
+        all_encoded_ndp_encoded_solutions = copy.deepcopy(
+            all_encoded_ndp_encoded_solutions
+        )
 
         solution_sets_for_local_search = []
 
@@ -1121,12 +1126,12 @@ class SolutionHandler(Helper):
     def print_similarity(
         self,
         encoded_hdp_solution: List[int],
-        encoded_ndp_solution: List[int],
+        encoded_ndp_solution_list: List[int],
     ):
-        similarity = self.calculate_similarity_between_encoded_routes(
-            encoded_route_1=encoded_hdp_solution,
-            encoded_route_2=encoded_ndp_solution,
-            weight_coefficient=len(encoded_ndp_solution),
+        similarity = self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+            hdp_encoded_routes=encoded_hdp_solution,
+            ndp_encoded_routes_list=encoded_ndp_solution_list,
+            return_full_result=False,
         )
         print(f"Similarity: {similarity}")
 
@@ -1242,7 +1247,7 @@ def main():
             encoded_hdp_solution=ind_hdp_solution_handler.get_best_encoded_solutions(1)[
                 0
             ],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
     """
@@ -1289,7 +1294,7 @@ def main():
             encoded_hdp_solution=dep_hdp_solution_handler_2o.get_best_encoded_solutions(
                 1
             )[0],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
     if ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE:
@@ -1333,7 +1338,7 @@ def main():
             encoded_hdp_solution=dep_hdp_solution_handler_3o.get_best_encoded_solutions(
                 1
             )[0],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
 
