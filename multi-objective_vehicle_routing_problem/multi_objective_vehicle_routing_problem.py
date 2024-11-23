@@ -722,6 +722,28 @@ class Helper:
         return similarity
 
     @staticmethod
+    def calculate_similarity_between_hdp_flatted_routes_and_ndp_flatted_routes_list(
+        hdp_flatted_routes: List[set[int, int]],
+        ndp_flatted_routes_list: List[List[set[int, int]]],
+        return_full_result: bool = True,
+    ):
+        max_similarity = 0.0
+        best_ndp_flatted_routes = ndp_flatted_routes_list[0]
+
+        for ndp_flatted_routes in ndp_flatted_routes_list:
+            similarity = Helper.calculate_similarity_between_flatted_routes(
+                hdp_flatted_routes, ndp_flatted_routes, len(ndp_flatted_routes)
+            )
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_ndp_flatted_routes = ndp_flatted_routes
+
+        if return_full_result:
+            return max_similarity
+
+        return set(hdp_flatted_routes, best_ndp_flatted_routes, max_similarity)
+
+    @staticmethod
     def calculate_similarity_between_encoded_routes(
         encoded_route_1: List[int],
         encoded_route_2: List[int],
@@ -737,6 +759,33 @@ class Helper:
         return Helper.calculate_similarity_between_flatted_routes(
             flatted_route_1, flatted_route_2, len(flatted_route_2)
         )
+
+    @staticmethod
+    def calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+        hdp_encoded_routes: List[List[int]],
+        ndp_encoded_routes_list: List[List[int]],
+        return_full_result: bool = True,
+    ):
+        hdp_flatted_routes = Helper.flatten_encoded_route(hdp_encoded_routes)
+
+        max_similarity = 0.0
+        best_ndp_flatted_routes = Helper.flatten_encoded_route(
+            ndp_encoded_routes_list[0]
+        )
+
+        for ndp_encoded_routes in ndp_encoded_routes_list:
+            ndp_flatted_routes = Helper.flatten_encoded_route(ndp_encoded_routes)
+            similarity = Helper.calculate_similarity_between_flatted_routes(
+                hdp_flatted_routes, ndp_flatted_routes, len(ndp_flatted_routes)
+            )
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_ndp_flatted_routes = ndp_flatted_routes
+
+        if not return_full_result:
+            return max_similarity
+
+        return set(hdp_flatted_routes, best_ndp_flatted_routes, max_similarity)
 
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
@@ -883,9 +932,6 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 
         n_obj = 2
         if self.optimize_similality:
-            self.flatten_ndp_solutions = [
-                self.flatten_encoded_route(solution) for solution in self.ndp_solutions
-            ]
             self.sample_count = 0
             n_obj = 3
 
@@ -913,7 +959,12 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
             and self.ndp_solutions.shape[0] > 0
             and self.optimize_similality
         ):
-            f3 = -1 * self.calculate_similarity_between_ndp_and_hdp_solution(x)
+            f3 = (
+                -1
+                * self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+                    x, self.ndp_solutions, return_full_result=False
+                )
+            )
             self.sample_count += 1
 
             out["F"] = np.array([f1, f2, f3])
@@ -953,18 +1004,6 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         # Add HDP customers
         for customer in self.hdp_customer_list:
             self.map_graph.add_location(customer)
-
-    def calculate_similarity_between_ndp_and_hdp_solution(self, hdp_solution: List):
-        output = 0.0
-        flatten_hdp_solution = self.flatten_encoded_route(hdp_solution)
-
-        for flatten_ndp_solution in self.flatten_ndp_solutions:
-            similarity = self.calculate_similarity_between_flatted_routes(
-                flatten_hdp_solution, flatten_ndp_solution, len(flatten_ndp_solution)
-            )
-            output = max(output, similarity)
-
-        return output
 
     def get_map_graph(self):
         return self.map_graph
