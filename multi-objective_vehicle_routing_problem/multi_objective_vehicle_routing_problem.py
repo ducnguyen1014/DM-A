@@ -582,7 +582,7 @@ class Helper:
         pass
 
     @staticmethod
-    def transform_encoded_to_decoded(encoded_routes: np.array):
+    def transform_encoded_to_decoded(encoded_routes: List[int]) -> List[List[int]]:
         """
         Transform encoded routes to decoded routes.
 
@@ -620,7 +620,37 @@ class Helper:
         return decoded_routes
 
     @staticmethod
-    def transform_encoded_to_flatted(encoded_route: List[int]):
+    def transform_decoded_to_encoded(decoded_routes: List[List[int]]) -> List[int]:
+        """
+        Transform decoded routes back to encoded routes.
+
+        Args:
+            decoded_routes (List[List[int]]): [[3, 1], [5, 4], [2]]
+
+        Returns:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+        """
+        encoded_routes: List[int] = []
+
+        for group in decoded_routes:
+            for index, element in enumerate(group):
+                # Add the element itself
+                encoded_routes.append(element)
+                # Add 1 after the last element in the group, 0 otherwise
+                if index == len(group) - 1:
+                    encoded_routes.append(1)
+                else:
+                    encoded_routes.append(0)
+
+        # Convert the first half of even-indexed elements to their "ranked" form
+        even_indices = np.array(encoded_routes[0::2])
+        ranked_indices = np.argsort(np.argsort(even_indices)) + 1
+        encoded_routes[0::2] = ranked_indices.tolist()
+
+        return encoded_routes
+
+    @staticmethod
+    def transform_encoded_to_flatted(encoded_route: List[int]) -> List[set[int, int]]:
         """
         Transform encoded routes to flatted routes
 
