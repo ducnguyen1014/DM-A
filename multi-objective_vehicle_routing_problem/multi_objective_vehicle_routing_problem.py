@@ -53,9 +53,10 @@ SEED = 30
 random.seed(SEED)
 np.random.seed(SEED)
 
-ENABLE_IND_HDP_PROBLEM = True
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
-ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
+ENABLE_IND_HDP_PROBLEM = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = True
 
 # Plot settings
 ENABLE_COORDINATES = True
@@ -828,7 +829,13 @@ class Helper:
         if not return_full_result:
             return max_similarity
 
-        return set(hdp_flatted_routes, best_ndp_flatted_routes, max_similarity)
+        return tuple(
+            [
+                Helper.transform_encoded_to_decoded(hdp_encoded_routes),
+                Helper.transform_encoded_to_decoded(best_ndp_flatted_routes),
+                max_similarity,
+            ]
+        )
 
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
@@ -1065,7 +1072,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         self.map_graph.visualize()
 
 
-class SolutionHandler(Helper):
+class LocalSearchHandler(Helper):
     def __init__(self, map_graph: MapGraph):
         self.map_graph: MapGraph = map_graph
         self.result: Result = None
@@ -1073,22 +1080,139 @@ class SolutionHandler(Helper):
     def set_result(self, result: Result):
         self.result = copy.deepcopy(result)
 
-    def calculate_similarity_for_hdp_ndp_solution_sets(
-        self, all_encoded_ndp_encoded_solutions: List[List[int]]
+    def _find_edges(self, solution):
+        edges = []
+        for car in solution:
+            if len(car) < 2:
+                continue
+            else:
+                for i in range(len(car) - 1):
+                    edge = [car[i], car[i + 1]]
+                    edges.append(edge)
+        return edges
+
+    def _find_customer(self, solution, customer):
+        for i in range(len(solution)):
+            car = solution[i]
+            if customer in car:
+                return i, car.index(customer)
+        raise ValueError("Customer not found.")
+
+    def _find_customer_after_first_in_hdp_solution(
+        self, hdp_solution, edge, force_same_car=True
     ):
-        all_encoded_hdp_solutions = copy.deepcopy(self.get_best_encoded_solutions())
-        all_encoded_ndp_encoded_solutions = copy.deepcopy(
-            all_encoded_ndp_encoded_solutions
+        first_customer_car_index, first_customer_position_index = self._find_customer(
+            solution=hdp_solution, customer=edge[0]
+        )
+        # Normal: in the same car
+        if (
+            len(hdp_solution[first_customer_car_index])
+            > first_customer_position_index + 1
+        ):
+            return first_customer_car_index, first_customer_position_index + 1
+        # If in the next car, get next position as usual
+        elif not force_same_car:
+            # get the first of next car
+            if len(hdp_solution) > first_customer_car_index + 1:
+                return first_customer_car_index + 1, 0
+            # If in the last car already, get the first car
+            else:
+                return 0, 0
+        else:
+            return None, None
+
+    def _local_search_single_edge(self, hdp_solution, edge, force_same_car=True):
+        hdp_solution = copy.deepcopy(hdp_solution)
+        first_customer = edge[0]
+        second_customer = edge[1]
+        customer_after_first_car_index, customer_after_first_customer_index = (
+            self._find_customer_after_first_in_hdp_solution(
+                hdp_solution=hdp_solution, edge=edge, force_same_car=force_same_car
+            )
         )
 
-        solution_sets_for_local_search = []
+        if (
+            customer_after_first_car_index is not None
+            and customer_after_first_customer_index is not None
+        ):
+            customer_after_first = hdp_solution[customer_after_first_car_index][
+                customer_after_first_customer_index
+            ]
+            second_customer_car_index, second_customer_position_index = (
+                self.find_customer(solution=hdp_solution, customer=second_customer)
+            )
+            hdp_solution[customer_after_first_car_index][
+                customer_after_first_customer_index
+            ] = second_customer
+            hdp_solution[second_customer_car_index][
+                second_customer_position_index
+            ] = customer_after_first
 
-        for encoded_hdp_solution in all_encoded_hdp_solutions:
-            Helper.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
-                hdp_encoded_routes=encoded_hdp_solution,
-                ndp_encoded_routes_list=all_encoded_ndp_encoded_solutions,
+        return hdp_solution
+
+    def _internal_calculate_local_search(
+        self, ndp_solution, hdp_solution, force_same_car=True
+    ):
+        edges = self._find_edges(ndp_solution)
+        for edge in edges:
+            hdp_solution = self._local_search_single_edge(
+                hdp_solution=hdp_solution, edge=edge, force_same_car=force_same_car
+            )
+        return hdp_solution
+
+    def get_best_encoded_solutions(self, number_of_solutions: int | float = None):
+        if not number_of_solutions:
+            best_encoded_solutions = copy.deepcopy(self.result.X)
+        else:
+            number_of_solutions = self._validate_number_of_solution_value(
+                number_of_solutions
+            )
+            best_encoded_solutions = copy.deepcopy(self.result.X[:number_of_solutions])
+
+        result = np.zeros_like(best_encoded_solutions, dtype=int)
+
+        for index in range(len(best_encoded_solutions)):
+            result[index][0::2] = (
+                np.argsort(np.argsort(best_encoded_solutions[index][0::2])) + 1
+            )
+
+            result[index][1::2] = np.round(best_encoded_solutions[index][1::2])
+
+        return result
+
+    def calculate_local_search(
+        self,
+        ndp_encoded_solution_list: List[List[int]],
+    ):
+        if (
+            not isinstance(ndp_encoded_solution_list, np.ndarray)
+            or ndp_encoded_solution_list.shape[0] < 1
+        ):
+            raise ValueError(
+                "'ndp_encoded_solution_list' must be a list with at least one element."
+            )
+
+        hdp_encoded_solution_list = self.get_best_encoded_solutions()
+        ndp_encoded_solution_list = copy.deepcopy(ndp_encoded_solution_list)
+
+        # Gather set of hdp decoded solution and corresponding most similar ndp decoded solution
+        similar_hdp_ndp_decoded_solution_set: List[Tuple] = []
+        for hdp_encoded_solution in hdp_encoded_solution_list:
+            similar_set = self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+                hdp_encoded_routes=hdp_encoded_solution,
+                ndp_encoded_routes_list=ndp_encoded_solution_list,
                 return_full_result=True,
             )
+            similar_hdp_ndp_decoded_solution_set.append(similar_set)
+
+
+class SolutionHandler(Helper):
+    def __init__(self, map_graph: MapGraph):
+        self.map_graph: MapGraph = map_graph
+        self.result: Result = None
+
+    def set_result(self, result: Result):
+        self.result = copy.deepcopy(result)
 
     def _validate_number_of_solution_value(self, index_of_solution):
         if not self.result:
@@ -1292,7 +1416,7 @@ def main():
             optimize_similality=False,
         )
 
-        # dep_hdp_problem.visualize()
+        # dep_hdp_problem_2o.visualize()
 
         dep_hdp_algorithm_2o = NSGA2(
             pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
@@ -1336,7 +1460,7 @@ def main():
             optimize_similality=True,
         )
 
-        # dep_hdp_problem.visualize()
+        # dep_hdp_problem_3o.visualize()
 
         dep_hdp_algorithm_3o = NSGA2(
             pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
@@ -1370,6 +1494,64 @@ def main():
             )[0],
             encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
+
+    if ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC:
+        dep_hdp_problem_2o_memetic = HDP_MultiObjectiveVehicleRoutingProblem(
+            ndp_customer_list=ndp_problem.get_ndp_customer_list(),
+            number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
+            range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
+            ndp_encoded_solutions=ndp_solution_handler.get_best_encoded_solutions(),
+            optimize_similality=False,
+        )
+
+        # dep_hdp_problem_2o_memetic.visualize()
+
+        dep_hdp_algorithm_2o_memetic = NSGA2(
+            pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
+            n_offsprings=20,
+            sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
+            crossover=SBX(prob=0.9, eta=15),
+            mutation=PM(eta=20),
+            eliminate_duplicates=True,
+        )
+
+        # Run the optimization
+        dep_hdp_res_2o_memetic = minimize(
+            dep_hdp_problem_2o_memetic,
+            dep_hdp_algorithm_2o_memetic,
+            ("n_gen", 200),
+            verbose=False,
+        )
+
+        # Create local search handler
+        dep_hdp_local_search_handler_2o_memetic = LocalSearchHandler(
+            dep_hdp_problem_2o_memetic.get_map_graph()
+        )
+        dep_hdp_local_search_handler_2o_memetic.set_result(dep_hdp_res_2o_memetic)
+        dep_hdp_local_search_handler_2o_memetic.calculate_local_search(
+            ndp_encoded_solution_list=ndp_solution_handler.get_best_encoded_solutions()
+        )
+
+        # # Create solution handler
+        # dep_hdp_solution_handler_2o_memetic = SolutionHandler(
+        #     dep_hdp_problem_2o_memetic.get_map_graph()
+        # )
+        # dep_hdp_solution_handler_2o_memetic.set_result(dep_hdp_res_2o_memetic)
+        # dep_hdp_solution_handler_2o_memetic.print_best_decoded_solutions(1)
+
+        # if ENABLE_SOLUTION_VISUALIZATION:
+        #     dep_hdp_solution_handler_2o_memetic.visualize_solution(
+        #         "Dependent HDP problem - 2 objectives"
+        #     )
+
+        # dep_hdp_solution_handler_2o_memetic.print_similarity(
+        #     encoded_hdp_solution=dep_hdp_solution_handler_2o_memetic.get_best_encoded_solutions(
+        #         1
+        #     )[
+        #         0
+        #     ],
+        #     encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
+        # )
 
 
 if __name__ == "__main__":
