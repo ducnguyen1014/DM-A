@@ -53,9 +53,9 @@ SEED = 30
 random.seed(SEED)
 np.random.seed(SEED)
 
-ENABLE_IND_HDP_PROBLEM = False
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = False
-ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = False
+ENABLE_IND_HDP_PROBLEM = True
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
+ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
 ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = True
 
 # Plot settings
@@ -1381,7 +1381,7 @@ class LocalSearchHandler(SolutionHandler):
     def visualize_solution(self, graph_title: str = None, index_of_solution: int = 0):
         self._validate_number_of_solution_value(index_of_solution)
 
-        route_list: List[List[int]] = self.hdp_decoded_solution_list
+        route_list: List[List[int]] = self.hdp_decoded_solution_list[index_of_solution]
 
         # Add roads
         self.map_graph.clean_roads()
