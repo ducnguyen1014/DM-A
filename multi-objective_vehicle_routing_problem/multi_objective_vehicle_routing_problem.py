@@ -1118,6 +1118,18 @@ class SolutionHandler(Helper):
 
         return result
 
+    def get_best_decoded_solutions(self, number_of_solutions: int | float = None):
+        solution_list = [
+            self.transform_encoded_to_decoded(solution)
+            for solution in self.get_best_encoded_solutions(number_of_solutions)
+        ]
+        unique_nested_list = list(
+            map(list, {tuple(map(tuple, sublist)) for sublist in solution_list})
+        )
+
+        # Convert the tuples back to lists
+        return [list(map(list, item)) for item in unique_nested_list]
+
     def get_best_f(self, number_of_f: int = None):
         if not number_of_f:
             return copy.deepcopy(self.result.F)
