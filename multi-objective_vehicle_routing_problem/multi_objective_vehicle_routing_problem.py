@@ -56,6 +56,7 @@ np.random.seed(SEED)
 ENABLE_IND_HDP_PROBLEM = True
 ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
 ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = True
 
 # Plot settings
 ENABLE_COORDINATES = True
@@ -509,17 +510,17 @@ class CustomRandomSampling(Sampling):
         # Case 1: If this is HDP problem and it has NDP solutions, then use those solutions.
         if (
             isinstance(problem, HDP_MultiObjectiveVehicleRoutingProblem)
-            and isinstance(problem.ndp_solutions, np.ndarray)
-            and problem.ndp_solutions.shape[0] > 0
+            and isinstance(problem.ndp_encoded_solutions, np.ndarray)
+            and problem.ndp_encoded_solutions.shape[0] > 0
         ):
-            initial_ndp_solutions = problem.ndp_solutions
-            transformed_initial_ndp_solutions = []
+            initial_ndp_encoded_solutions = problem.ndp_encoded_solutions
+            transformed_initial_ndp_encoded_solutions = []
 
             gap_in_number_of_customers = problem.number_of_hdp_customer - len(
                 problem.ndp_customer_list
             )
 
-            for index in range(len(initial_ndp_solutions)):
+            for index in range(len(initial_ndp_encoded_solutions)):
                 # Create a new permutation of customers
                 permutation = (
                     np.random.permutation(gap_in_number_of_customers)
@@ -532,15 +533,15 @@ class CustomRandomSampling(Sampling):
 
                 # Create new sample from NDP solution and encoded array of new customers
                 new_sample = self._insert_pairs_randomly(
-                    initial_ndp_solutions[index], new_array
+                    initial_ndp_encoded_solutions[index], new_array
                 )
 
                 # Ensure the last flag is 1
                 new_sample[-1] = 1
 
-                transformed_initial_ndp_solutions.append(new_sample)
+                transformed_initial_ndp_encoded_solutions.append(new_sample)
 
-            return transformed_initial_ndp_solutions
+            return transformed_initial_ndp_encoded_solutions
 
         # Case 2: The following code is for NDP problem and HDP problem that does not has NDP solutions
         else:
@@ -567,8 +568,124 @@ class CustomRandomSampling(Sampling):
 
 
 class Helper:
+    """
+    All form of solution (routes)
+
+    Encoded form (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+
+    Flatted form (List[set[int, int]]): [{0, 3}, {3, 1}, {1, 0}, {0, 5}, {5, 4}, {4, 0}, {0, 2}, {2, 0}]
+
+    Decoded form (List[List[int]]): [[3, 1], [5, 4], [2]]
+
+    """
+
     def __init__(self):
         pass
+
+    @staticmethod
+    def transform_encoded_to_decoded(encoded_routes: List[int]) -> List[List[int]]:
+        """
+        Transform encoded routes to decoded routes.
+
+        Args:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+
+        Returns:
+            decoded_routes (List[List[int]]): [[3, 1], [5, 4], [2]]
+        """
+
+        encoded_routes = copy.deepcopy(encoded_routes)
+        encoded_routes[0::2] = np.argsort(np.argsort(encoded_routes[0::2])) + 1
+        try:
+            encoded_routes = np.array(encoded_routes).astype(int).tolist()
+        except:
+            pass
+
+        decoded_routes: List = []
+        current_group: List = []
+
+        for i in range(0, len(encoded_routes), 2):
+            # Append the even-index element to the current group
+            current_group.append(encoded_routes[i])
+
+            # Check if the next odd-index element is 1
+            if i + 1 < len(encoded_routes) and encoded_routes[i + 1] == 1:
+                # If it's a separator (1), add the current group to the result and start a new group
+                decoded_routes.append(current_group)
+                current_group = []
+
+        # Append the last group if it's non-empty
+        if current_group:
+            decoded_routes.append(current_group)
+
+        return decoded_routes
+
+    @staticmethod
+    def transform_decoded_to_encoded(decoded_routes: List[List[int]]) -> List[int]:
+        """
+        Transform decoded routes back to encoded routes.
+
+        Args:
+            decoded_routes (List[List[int]]): [[3, 1], [5, 4], [2]]
+
+        Returns:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+        """
+        encoded_routes: List[int] = []
+
+        for group in decoded_routes:
+            for index, element in enumerate(group):
+                # Add the element itself
+                encoded_routes.append(element)
+                # Add 1 after the last element in the group, 0 otherwise
+                if index == len(group) - 1:
+                    encoded_routes.append(1)
+                else:
+                    encoded_routes.append(0)
+
+        # Convert the first half of even-indexed elements to their "ranked" form
+        even_indices = np.array(encoded_routes[0::2])
+        ranked_indices = np.argsort(np.argsort(even_indices)) + 1
+        encoded_routes[0::2] = ranked_indices.tolist()
+
+        return encoded_routes
+
+    @staticmethod
+    def transform_encoded_to_flatted(encoded_route: List[int]) -> List[set[int, int]]:
+        """
+        Transform encoded routes to flatted routes
+
+        Args:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+
+        Returns:
+            flatted_routes (List[set[int, int]]): [{0, 3}, {3, 1}, {1, 0}, {0, 5}, {5, 4}, {4, 0}, {0, 2}, {2, 0}]
+        """
+
+        flatted_routes = []
+
+        for i in range(0, len(encoded_route), 2):
+            customer = encoded_route[i]
+            next_customer = None
+
+            flag = encoded_route[i + 1]
+
+            if (i + 2) < len(encoded_route):
+                next_customer = encoded_route[i + 2]
+
+            if i == 0:
+                flatted_routes.append({0, customer})
+
+            if flag == 0 and next_customer:
+                flatted_routes.append({customer, next_customer})
+
+            elif flag == 1:
+                flatted_routes.append({customer, 0})
+
+                if next_customer:
+                    flatted_routes.append({0, next_customer})
+
+        return flatted_routes
 
     @staticmethod
     def calculate_x_lower_bound(number_of_customer: int) -> np.array:
@@ -629,79 +746,6 @@ class Helper:
         return max_distance_among_trucks
 
     @staticmethod
-    def decode_route(encoded_routes: np.array):
-        """
-        Decode routes.
-
-        Args:
-            encoded_routes (): [4, 0, 1, 0, 6, 1, 3, 0, 5, 0, 2, 1]
-
-        Returns:
-            decoded_routes (list[np.array]): [[4, 1, 6], [3, 5, 2]]
-        """
-        encoded_routes = copy.deepcopy(encoded_routes)
-        encoded_routes[0::2] = np.argsort(np.argsort(encoded_routes[0::2])) + 1
-        try:
-            encoded_routes = encoded_routes.astype(int)
-        except:
-            pass
-
-        decoded_routes: List = []
-        current_group: List = []
-
-        for i in range(0, len(encoded_routes), 2):
-            # Append the even-index element to the current group
-            current_group.append(encoded_routes[i])
-
-            # Check if the next odd-index element is 1
-            if i + 1 < len(encoded_routes) and encoded_routes[i + 1] == 1:
-                # If it's a separator (1), add the current group to the result and start a new group
-                decoded_routes.append(current_group)
-                current_group = []
-
-        # Append the last group if it's non-empty
-        if current_group:
-            decoded_routes.append(current_group)
-
-        return decoded_routes
-
-    @staticmethod
-    def flatten_encoded_route(encoded_route: List[int]):
-        """
-        Input: [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
-
-        Output: [{0, 3}, {3, 1}, {1, 0}, {0, 5}, {5, 4}, {4, 0}, {0, 2}, {2, 0}]
-
-        Args:
-            encoded_route (List[int]): encoded_route
-        """
-
-        output = []
-
-        for i in range(0, len(encoded_route), 2):
-            customer = encoded_route[i]
-            next_customer = None
-
-            flag = encoded_route[i + 1]
-
-            if (i + 2) < len(encoded_route):
-                next_customer = encoded_route[i + 2]
-
-            if i == 0:
-                output.append({0, customer})
-
-            if flag == 0 and next_customer:
-                output.append({customer, next_customer})
-
-            elif flag == 1:
-                output.append({customer, 0})
-
-                if next_customer:
-                    output.append({0, next_customer})
-
-        return output
-
-    @staticmethod
     def calculate_similarity_between_flatted_routes(
         flatted_route_1: List[set[int, int]],
         flatted_route_2: List[set[int, int]],
@@ -722,6 +766,28 @@ class Helper:
         return similarity
 
     @staticmethod
+    def calculate_similarity_between_hdp_flatted_routes_and_ndp_flatted_routes_list(
+        hdp_flatted_routes: List[set[int, int]],
+        ndp_flatted_routes_list: List[List[set[int, int]]],
+        return_full_result: bool = True,
+    ):
+        max_similarity = 0.0
+        best_ndp_flatted_routes = ndp_flatted_routes_list[0]
+
+        for ndp_flatted_routes in ndp_flatted_routes_list:
+            similarity = Helper.calculate_similarity_between_flatted_routes(
+                hdp_flatted_routes, ndp_flatted_routes, len(ndp_flatted_routes)
+            )
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_ndp_flatted_routes = ndp_flatted_routes
+
+        if return_full_result:
+            return max_similarity
+
+        return set(hdp_flatted_routes, best_ndp_flatted_routes, max_similarity)
+
+    @staticmethod
     def calculate_similarity_between_encoded_routes(
         encoded_route_1: List[int],
         encoded_route_2: List[int],
@@ -731,11 +797,44 @@ class Helper:
         if weight_coefficient == 0:
             raise ValueError("Cannot divide by zero")
 
-        flatted_route_1 = Helper.flatten_encoded_route(encoded_route_1)
-        flatted_route_2 = Helper.flatten_encoded_route(encoded_route_2)
+        flatted_route_1 = Helper.transform_encoded_to_flatted(encoded_route_1)
+        flatted_route_2 = Helper.transform_encoded_to_flatted(encoded_route_2)
 
         return Helper.calculate_similarity_between_flatted_routes(
             flatted_route_1, flatted_route_2, len(flatted_route_2)
+        )
+
+    @staticmethod
+    def calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+        hdp_encoded_routes: List[List[int]],
+        ndp_encoded_routes_list: List[List[int]],
+        return_full_result: bool = True,
+    ):
+        hdp_flatted_routes = Helper.transform_encoded_to_flatted(hdp_encoded_routes)
+
+        max_similarity = 0.0
+        best_ndp_flatted_routes = Helper.transform_encoded_to_flatted(
+            ndp_encoded_routes_list[0]
+        )
+
+        for ndp_encoded_routes in ndp_encoded_routes_list:
+            ndp_flatted_routes = Helper.transform_encoded_to_flatted(ndp_encoded_routes)
+            similarity = Helper.calculate_similarity_between_flatted_routes(
+                hdp_flatted_routes, ndp_flatted_routes, len(ndp_flatted_routes)
+            )
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_ndp_flatted_routes = ndp_flatted_routes
+
+        if not return_full_result:
+            return max_similarity
+
+        return tuple(
+            [
+                Helper.transform_encoded_to_decoded(hdp_encoded_routes),
+                Helper.transform_encoded_to_decoded(best_ndp_flatted_routes),
+                max_similarity,
+            ]
         )
 
 
@@ -777,7 +876,7 @@ class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         number_of_truck = np.round(x[1::2]).astype(int).sum()
         encoded_routes = x
 
-        decoded_routes = self.decode_route(encoded_routes)
+        decoded_routes = self.transform_encoded_to_decoded(encoded_routes)
 
         # Objective 1: Maximum distance traveled by any truck (normalized)
         f1 = self.calculate_max_distance_among_trucks(
@@ -841,7 +940,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         ndp_customer_list: List[Customer],
         number_of_hdp_customer: int,
         range_of_hdp_customer: Tuple[Tuple[int, int], Tuple[int, int]],
-        ndp_solutions: np.array = None,
+        ndp_encoded_solutions: np.array = None,
         optimize_similality: bool = False,
     ):
         self.ndp_customer_list = copy.deepcopy(ndp_customer_list)
@@ -852,8 +951,11 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 
         self.depot: Depot = Depot(DEPOT_LOCATION[0], DEPOT_LOCATION[1])
 
-        if isinstance(ndp_solutions, np.ndarray) and ndp_solutions.shape[0] > 0:
-            self.ndp_solutions = copy.deepcopy(ndp_solutions)
+        if (
+            isinstance(ndp_encoded_solutions, np.ndarray)
+            and ndp_encoded_solutions.shape[0] > 0
+        ):
+            self.ndp_encoded_solutions = copy.deepcopy(ndp_encoded_solutions)
 
             if optimize_similality:
                 print(
@@ -864,7 +966,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
                     "\n\nDependent HDP_MultiObjectiveVehicleRoutingProblem - 2 objectives"
                 )
         else:
-            self.ndp_solutions = None
+            self.ndp_encoded_solutions = None
             print("\n\nIndependent HDP_MultiObjectiveVehicleRoutingProblem")
 
         # Define map
@@ -883,9 +985,6 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
 
         n_obj = 2
         if self.optimize_similality:
-            self.flatten_ndp_solutions = [
-                self.flatten_encoded_route(solution) for solution in self.ndp_solutions
-            ]
             self.sample_count = 0
             n_obj = 3
 
@@ -898,7 +997,7 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         number_of_truck = np.round(x[1::2]).astype(int).sum()
         encoded_routes = x
 
-        decoded_routes = self.decode_route(encoded_routes)
+        decoded_routes = self.transform_encoded_to_decoded(encoded_routes)
 
         # Objective 1: Maximum distance traveled by any truck (normalized)
         f1 = self.calculate_max_distance_among_trucks(
@@ -909,11 +1008,16 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         f2 = number_of_truck / self.number_of_hdp_customer
 
         if (
-            self.ndp_solutions is not None
-            and self.ndp_solutions.shape[0] > 0
+            self.ndp_encoded_solutions is not None
+            and self.ndp_encoded_solutions.shape[0] > 0
             and self.optimize_similality
         ):
-            f3 = -1 * self.calculate_similarity_between_ndp_and_hdp_solution(x)
+            f3 = (
+                -1
+                * self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+                    x, self.ndp_encoded_solutions, return_full_result=False
+                )
+            )
             self.sample_count += 1
 
             out["F"] = np.array([f1, f2, f3])
@@ -953,18 +1057,6 @@ class HDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
         # Add HDP customers
         for customer in self.hdp_customer_list:
             self.map_graph.add_location(customer)
-
-    def calculate_similarity_between_ndp_and_hdp_solution(self, hdp_solution: List):
-        output = 0.0
-        flatten_hdp_solution = self.flatten_encoded_route(hdp_solution)
-
-        for flatten_ndp_solution in self.flatten_ndp_solutions:
-            similarity = self.calculate_similarity_between_flatted_routes(
-                flatten_hdp_solution, flatten_ndp_solution, len(flatten_ndp_solution)
-            )
-            output = max(output, similarity)
-
-        return output
 
     def get_map_graph(self):
         return self.map_graph
@@ -1008,15 +1100,6 @@ class SolutionHandler(Helper):
 
     def get_best_encoded_solutions(self, number_of_solutions: int | float = None):
         if not number_of_solutions:
-            return copy.deepcopy(self.result.X)
-        else:
-            number_of_solutions = self._validate_number_of_solution_value(
-                number_of_solutions
-            )
-            return copy.deepcopy(self.result.X[:number_of_solutions])
-
-    def get_best_solutions(self, number_of_solutions: int | float = None):
-        if not number_of_solutions:
             best_encoded_solutions = copy.deepcopy(self.result.X)
         else:
             number_of_solutions = self._validate_number_of_solution_value(
@@ -1035,6 +1118,18 @@ class SolutionHandler(Helper):
 
         return result
 
+    def get_best_decoded_solutions(self, number_of_solutions: int | float = None):
+        solution_list = [
+            self.transform_encoded_to_decoded(solution)
+            for solution in self.get_best_encoded_solutions(number_of_solutions)
+        ]
+        unique_nested_list = list(
+            map(list, {tuple(map(tuple, sublist)) for sublist in solution_list})
+        )
+
+        # Convert the tuples back to lists
+        return [list(map(list, item)) for item in unique_nested_list]
+
     def get_best_f(self, number_of_f: int = None):
         if not number_of_f:
             return copy.deepcopy(self.result.F)
@@ -1042,13 +1137,13 @@ class SolutionHandler(Helper):
             number_of_f = self._validate_number_of_solution_value(number_of_f)
             return copy.deepcopy(self.result.F[:number_of_f])
 
-    def print_best_solutions(self, number_of_solutions: int = None):
-        encoded_solution_list = self.get_best_solutions(number_of_solutions)
+    def print_best_decoded_solutions(self, number_of_solutions: int = None):
+        encoded_solution_list = self.get_best_encoded_solutions(number_of_solutions)
         f_list = self.get_best_f(number_of_solutions)
 
         for index in range(len(encoded_solution_list)):
             solution = copy.deepcopy(encoded_solution_list[index])
-            solution = self.decode_route(solution)
+            solution = self.transform_encoded_to_decoded(solution)
 
             print()
             print(f"SOLUTION {index}")
@@ -1063,12 +1158,12 @@ class SolutionHandler(Helper):
     def print_similarity(
         self,
         encoded_hdp_solution: List[int],
-        encoded_ndp_solution: List[int],
+        encoded_ndp_solution_list: List[int],
     ):
-        similarity = self.calculate_similarity_between_encoded_routes(
-            encoded_route_1=encoded_hdp_solution,
-            encoded_route_2=encoded_ndp_solution,
-            weight_coefficient=len(encoded_ndp_solution),
+        similarity = self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+            hdp_encoded_routes=encoded_hdp_solution,
+            ndp_encoded_routes_list=encoded_ndp_solution_list,
+            return_full_result=False,
         )
         print(f"Similarity: {similarity}")
 
@@ -1077,7 +1172,228 @@ class SolutionHandler(Helper):
 
         encoded_solution: np.array = self.result.X[index_of_solution]
 
-        route_list: List[List[int]] = self.decode_route(encoded_solution)
+        route_list: List[List[int]] = self.transform_encoded_to_decoded(
+            encoded_solution
+        )
+
+        # Add roads
+        self.map_graph.clean_roads()
+        coordinate_list = self.map_graph.coordinate_list
+        depot = coordinate_list[0]
+
+        for route_index in range(len(route_list)):
+            color = ROUTE_COLORS[route_index]
+            self.map_graph.add_road(
+                start=depot,
+                end=coordinate_list[route_list[route_index][0]],
+                width=2,
+                color=color,
+            )
+
+            for index in range(len(route_list[route_index]) - 1):
+                self.map_graph.add_road(
+                    coordinate_list[route_list[route_index][index]],
+                    coordinate_list[route_list[route_index][index + 1]],
+                    width=2,
+                    color=color,
+                )
+
+            self.map_graph.add_road(
+                coordinate_list[route_list[route_index][-1]],
+                depot,
+                width=2,
+                color=color,
+            )
+
+        plt.figure(figsize=FIG_SIZE)
+        self.map_graph.compose_visualization_coordinates()
+        self.map_graph.compose_visualization_roads()
+        self.map_graph.visualize(graph_title)
+
+
+class LocalSearchHandler(SolutionHandler):
+    def __init__(self, map_graph: MapGraph):
+        print(
+            "\n\nDependent HDP_MultiObjectiveVehicleRoutingProblem - 2 objectives - memetic"
+        )
+        self.map_graph: MapGraph = map_graph
+        self.result: Result = None
+        self.hdp_decoded_solution_list: List[List[int]] = None
+
+    def set_result(self, result: Result):
+        self.result = copy.deepcopy(result)
+
+    def _find_edges(self, solution):
+        edges = []
+        for car in solution:
+            if len(car) < 2:
+                continue
+            else:
+                for i in range(len(car) - 1):
+                    edge = [car[i], car[i + 1]]
+                    edges.append(edge)
+        return edges
+
+    def _find_customer(self, solution, customer):
+        for i in range(len(solution)):
+            car = solution[i]
+            if customer in car:
+                return i, car.index(customer)
+        raise ValueError("Customer not found.")
+
+    def _find_customer_after_first_in_hdp_solution(
+        self, hdp_solution, edge, force_same_car=True
+    ):
+        first_customer_car_index, first_customer_position_index = self._find_customer(
+            solution=hdp_solution, customer=edge[0]
+        )
+        # Normal: in the same car
+        if (
+            len(hdp_solution[first_customer_car_index])
+            > first_customer_position_index + 1
+        ):
+            return first_customer_car_index, first_customer_position_index + 1
+        # If in the next car, get next position as usual
+        elif not force_same_car:
+            # get the first of next car
+            if len(hdp_solution) > first_customer_car_index + 1:
+                return first_customer_car_index + 1, 0
+            # If in the last car already, get the first car
+            else:
+                return 0, 0
+        else:
+            return None, None
+
+    def _local_search_single_edge(self, hdp_solution, edge, force_same_car=True):
+        hdp_solution = copy.deepcopy(hdp_solution)
+        first_customer = edge[0]
+        second_customer = edge[1]
+        customer_after_first_car_index, customer_after_first_customer_index = (
+            self._find_customer_after_first_in_hdp_solution(
+                hdp_solution=hdp_solution, edge=edge, force_same_car=force_same_car
+            )
+        )
+
+        if (
+            customer_after_first_car_index is not None
+            and customer_after_first_customer_index is not None
+        ):
+            customer_after_first = hdp_solution[customer_after_first_car_index][
+                customer_after_first_customer_index
+            ]
+            second_customer_car_index, second_customer_position_index = (
+                self._find_customer(solution=hdp_solution, customer=second_customer)
+            )
+            hdp_solution[customer_after_first_car_index][
+                customer_after_first_customer_index
+            ] = second_customer
+            hdp_solution[second_customer_car_index][
+                second_customer_position_index
+            ] = customer_after_first
+
+        return hdp_solution
+
+    def _internal_calculate_local_search(
+        self, ndp_solution, hdp_solution, force_same_car=True
+    ):
+        edges = self._find_edges(ndp_solution)
+        for edge in edges:
+            hdp_solution = self._local_search_single_edge(
+                hdp_solution=hdp_solution, edge=edge, force_same_car=force_same_car
+            )
+        return hdp_solution
+
+    def get_best_encoded_solutions(self, number_of_solutions: int | float = None):
+        solution_list = self.result.X
+
+        if self.hdp_decoded_solution_list:
+            solution_list = [
+                self.transform_decoded_to_encoded(hdp_decoded_solution)
+                for hdp_decoded_solution in self.hdp_decoded_solution_list
+            ]
+
+        if not number_of_solutions:
+            best_encoded_solutions = copy.deepcopy(solution_list)
+        else:
+            number_of_solutions = self._validate_number_of_solution_value(
+                number_of_solutions
+            )
+            best_encoded_solutions = copy.deepcopy(solution_list[:number_of_solutions])
+
+        result = np.zeros_like(best_encoded_solutions, dtype=int)
+
+        for index in range(len(best_encoded_solutions)):
+            result[index][0::2] = (
+                np.argsort(np.argsort(best_encoded_solutions[index][0::2])) + 1
+            )
+
+            result[index][1::2] = np.round(best_encoded_solutions[index][1::2])
+
+        return result
+
+    def calculate_local_search(
+        self,
+        ndp_encoded_solution_list: List[List[int]],
+    ):
+        if (
+            not isinstance(ndp_encoded_solution_list, np.ndarray)
+            or ndp_encoded_solution_list.shape[0] < 1
+        ):
+            raise ValueError(
+                "'ndp_encoded_solution_list' must be a list with at least one element."
+            )
+
+        hdp_encoded_solution_list = self.get_best_encoded_solutions()
+        ndp_encoded_solution_list = copy.deepcopy(ndp_encoded_solution_list)
+
+        self.hdp_decoded_solution_list: List[List[int]] = []
+
+        for hdp_encoded_solution in hdp_encoded_solution_list:
+
+            # Gather set of hdp decoded solution and corresponding most similar ndp decoded solution
+            similar_tuple = self.calculate_similarity_between_hdp_encoded_routes_and_ndp_encoded_routes_list(
+                hdp_encoded_routes=hdp_encoded_solution,
+                ndp_encoded_routes_list=ndp_encoded_solution_list,
+                return_full_result=True,
+            )
+
+            # Apply local search
+            local_search_tuple = self._internal_calculate_local_search(
+                hdp_solution=similar_tuple[0],
+                ndp_solution=similar_tuple[1],
+                force_same_car=True,
+            )
+
+            self.hdp_decoded_solution_list.append(local_search_tuple)
+
+    def get_hdp_decoded_solution_list(self, number_of_solutions: int = None):
+        if not number_of_solutions:
+            return self.hdp_decoded_solution_list
+        else:
+            self._validate_number_of_solution_value(number_of_solutions)
+        return self.hdp_decoded_solution_list[:number_of_solutions]
+
+    def print_best_decoded_solutions(self, number_of_solutions: int = None):
+        decoded_solution_list = self.get_hdp_decoded_solution_list(number_of_solutions)
+        f_list = self.get_best_f(number_of_solutions)
+
+        for index in range(len(decoded_solution_list)):
+            solution = copy.deepcopy(decoded_solution_list[index])
+
+            print()
+            print(f"SOLUTION {index}")
+            print(f"{solution}")
+            print(
+                f"- Maximum length among trucks: {self.map_graph.rescale_distance(f_list[index][0])}"
+            )
+            print(
+                f"- Number of trucks used: {self.map_graph.rescale_number_of_trucks(f_list[index][1])}"
+            )
+
+    def visualize_solution(self, graph_title: str = None, index_of_solution: int = 0):
+        self._validate_number_of_solution_value(index_of_solution)
+
+        route_list: List[List[int]] = self.hdp_decoded_solution_list[index_of_solution]
 
         # Add roads
         self.map_graph.clean_roads()
@@ -1140,7 +1456,7 @@ def main():
     # Create solution handler
     ndp_solution_handler = SolutionHandler(ndp_problem.get_map_graph())
     ndp_solution_handler.set_result(ndp_res)
-    ndp_solution_handler.print_best_solutions(1)
+    ndp_solution_handler.print_best_decoded_solutions(1)
     if ENABLE_SOLUTION_VISUALIZATION:
         ndp_solution_handler.visualize_solution("NDP problem")
 
@@ -1173,7 +1489,7 @@ def main():
         # Create solution handler
         ind_hdp_solution_handler = SolutionHandler(ind_hdp_problem.get_map_graph())
         ind_hdp_solution_handler.set_result(ind_hdp_res)
-        ind_hdp_solution_handler.print_best_solutions(1)
+        ind_hdp_solution_handler.print_best_decoded_solutions(1)
 
         if ENABLE_SOLUTION_VISUALIZATION:
             ind_hdp_solution_handler.visualize_solution("Independent HDP problem")
@@ -1182,7 +1498,7 @@ def main():
             encoded_hdp_solution=ind_hdp_solution_handler.get_best_encoded_solutions(1)[
                 0
             ],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
     """
@@ -1193,14 +1509,14 @@ def main():
             ndp_customer_list=ndp_problem.get_ndp_customer_list(),
             number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
             range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
-            ndp_solutions=ndp_solution_handler.get_best_solutions(),
+            ndp_encoded_solutions=ndp_solution_handler.get_best_encoded_solutions(),
             optimize_similality=False,
         )
 
-        # dep_hdp_problem.visualize()
+        # dep_hdp_problem_2o.visualize()
 
         dep_hdp_algorithm_2o = NSGA2(
-            pop_size=len(ndp_solution_handler.get_best_solutions()),
+            pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
             n_offsprings=20,
             sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
             crossover=SBX(prob=0.9, eta=15),
@@ -1218,7 +1534,7 @@ def main():
             dep_hdp_problem_2o.get_map_graph()
         )
         dep_hdp_solution_handler_2o.set_result(dep_hdp_res_2o)
-        dep_hdp_solution_handler_2o.print_best_solutions(1)
+        dep_hdp_solution_handler_2o.print_best_decoded_solutions(1)
 
         if ENABLE_SOLUTION_VISUALIZATION:
             dep_hdp_solution_handler_2o.visualize_solution(
@@ -1229,7 +1545,7 @@ def main():
             encoded_hdp_solution=dep_hdp_solution_handler_2o.get_best_encoded_solutions(
                 1
             )[0],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
     if ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE:
@@ -1237,14 +1553,14 @@ def main():
             ndp_customer_list=ndp_problem.get_ndp_customer_list(),
             number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
             range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
-            ndp_solutions=ndp_solution_handler.get_best_solutions(),
+            ndp_encoded_solutions=ndp_solution_handler.get_best_encoded_solutions(),
             optimize_similality=True,
         )
 
-        # dep_hdp_problem.visualize()
+        # dep_hdp_problem_3o.visualize()
 
         dep_hdp_algorithm_3o = NSGA2(
-            pop_size=len(ndp_solution_handler.get_best_solutions()),
+            pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
             n_offsprings=20,
             sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
             crossover=SBX(prob=0.9, eta=15),
@@ -1262,7 +1578,7 @@ def main():
             dep_hdp_problem_3o.get_map_graph()
         )
         dep_hdp_solution_handler_3o.set_result(dep_hdp_res_3o)
-        dep_hdp_solution_handler_3o.print_best_solutions(1)
+        dep_hdp_solution_handler_3o.print_best_decoded_solutions(1)
 
         if ENABLE_SOLUTION_VISUALIZATION:
             dep_hdp_solution_handler_3o.visualize_solution(
@@ -1273,7 +1589,60 @@ def main():
             encoded_hdp_solution=dep_hdp_solution_handler_3o.get_best_encoded_solutions(
                 1
             )[0],
-            encoded_ndp_solution=ndp_solution_handler.get_best_encoded_solutions(1)[0],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
+        )
+
+    if ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC:
+        dep_hdp_problem_2o_memetic = HDP_MultiObjectiveVehicleRoutingProblem(
+            ndp_customer_list=ndp_problem.get_ndp_customer_list(),
+            number_of_hdp_customer=NUMBER_OF_HDP_CUSTOMER,
+            range_of_hdp_customer=RANGE_OF_HDP_CUSTOMER,
+            ndp_encoded_solutions=ndp_solution_handler.get_best_encoded_solutions(),
+            optimize_similality=False,
+        )
+
+        # dep_hdp_problem_2o_memetic.visualize()
+
+        dep_hdp_algorithm_2o_memetic = NSGA2(
+            pop_size=len(ndp_solution_handler.get_best_encoded_solutions()),
+            n_offsprings=20,
+            sampling=CustomRandomSampling(NUMBER_OF_HDP_CUSTOMER),
+            crossover=SBX(prob=0.9, eta=15),
+            mutation=PM(eta=20),
+            eliminate_duplicates=True,
+        )
+
+        # Run the optimization
+        dep_hdp_res_2o_memetic = minimize(
+            dep_hdp_problem_2o_memetic,
+            dep_hdp_algorithm_2o_memetic,
+            ("n_gen", 200),
+            verbose=False,
+        )
+
+        # Create local search handler
+        dep_hdp_local_search_handler_2o_memetic = LocalSearchHandler(
+            dep_hdp_problem_2o_memetic.get_map_graph()
+        )
+        dep_hdp_local_search_handler_2o_memetic.set_result(dep_hdp_res_2o_memetic)
+        dep_hdp_local_search_handler_2o_memetic.calculate_local_search(
+            ndp_encoded_solution_list=ndp_solution_handler.get_best_encoded_solutions()
+        )
+
+        dep_hdp_local_search_handler_2o_memetic.print_best_decoded_solutions(1)
+
+        if ENABLE_SOLUTION_VISUALIZATION:
+            dep_hdp_local_search_handler_2o_memetic.visualize_solution(
+                "Dependent HDP problem - 2 objectives - memetic"
+            )
+
+        dep_hdp_local_search_handler_2o_memetic.print_similarity(
+            encoded_hdp_solution=dep_hdp_local_search_handler_2o_memetic.get_best_encoded_solutions(
+                1
+            )[
+                0
+            ],
+            encoded_ndp_solution_list=ndp_solution_handler.get_best_encoded_solutions(),
         )
 
 
