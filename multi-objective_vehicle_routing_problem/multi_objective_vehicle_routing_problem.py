@@ -597,7 +597,7 @@ class Helper:
         encoded_routes = copy.deepcopy(encoded_routes)
         encoded_routes[0::2] = np.argsort(np.argsort(encoded_routes[0::2])) + 1
         try:
-            encoded_routes = encoded_routes.astype(int)
+            encoded_routes = np.array(encoded_routes).astype(int).tolist()
         except:
             pass
 
