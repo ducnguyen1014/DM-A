@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 import copy
+from itertools import product
 
 # PARAMETERS ======================================================
 
@@ -506,6 +507,33 @@ class CustomRandomSampling(Sampling):
             result.extend([item, 0])
         return result
 
+    def generate_permutations_with_last_flag_one(self, input_list):
+        # Extract all odd indices to determine the flag positions
+        flag_indices = [i for i in range(len(input_list)) if i % 2 == 1]
+
+        # Ensure the last flag is always 1
+        flag_indices_except_last = flag_indices[:-1]
+        last_flag_index = flag_indices[-1]
+
+        # Generate all possible permutations for the other flag values (0 or 1)
+        all_permutations = product([0, 1], repeat=len(flag_indices_except_last))
+
+        # Generate lists based on the permutations
+        result = []
+        for perm in all_permutations:
+            new_list = input_list[:]  # Make a copy of the original list
+            for index, flag_value in zip(flag_indices_except_last, perm):
+                new_list[index] = flag_value
+            # Set the last flag to 1
+            new_list[last_flag_index] = 1
+            result.append(new_list)
+
+        # Ensure the given list is included
+        if input_list not in result:
+            result.append(input_list)
+
+        return result
+
     def _do(self, problem, n_samples, **kwargs):
         # Case 1: If this is HDP problem and it has NDP solutions, then use those solutions.
         if (
@@ -536,29 +564,66 @@ class CustomRandomSampling(Sampling):
                     initial_ndp_encoded_solutions[index], new_array
                 )
 
-                # Ensure the last flag is 1
-                new_sample[-1] = 1
-
-                transformed_initial_ndp_encoded_solutions.append(new_sample)
+                transformed_initial_ndp_encoded_solutions.extend(
+                    self.generate_permutations_with_last_flag_one(new_sample)
+                )
 
             return transformed_initial_ndp_encoded_solutions
 
         # Case 2: The following code is for NDP problem and HDP problem that does not has NDP solutions
         else:
             X = []  # Start with an empty list to hold samples
+            part_size = (
+                n_samples // self.number_of_customer
+            )  # Calculate size of each part
 
-            # Generate random permutations for each sample
-            for _ in range(n_samples):
+            for i in range(self.number_of_customer):
+                # Determine how many `1`s to place in sample[1::2] for this part
+                num_ones = i
+
+                for _ in range(part_size):
+                    # Create a random permutation of customer indices
+                    permutation = np.random.permutation(self.number_of_customer) + 1
+
+                    # Initialize the sample array
+                    sample = np.ones(2 * self.number_of_customer, dtype=int)
+
+                    # Set customer indices at even positions
+                    sample[0::2] = permutation
+
+                    # Generate a list with `num_ones` 1s and the rest 0s
+                    binary_choices = [1] * num_ones + [0] * (
+                        sample[1::2].shape[0] - num_ones
+                    )
+
+                    # Randomly shuffle the binary choices
+                    np.random.shuffle(binary_choices)
+
+                    # Set the binary choices in sample[1::2]
+                    sample[1::2] = binary_choices
+
+                    # Ensure the last element is 1
+                    sample[-1] = 1
+
+                    # Add the generated sample to the list
+                    X.append(sample)
+
+            # Handle any leftover samples due to rounding
+            remaining_samples = n_samples % self.number_of_customer
+            for _ in range(remaining_samples):
                 # Create a random permutation of customer indices
                 permutation = np.random.permutation(self.number_of_customer) + 1
 
-                # Insert zero after each element in the permutation
+                # Initialize the sample array
                 sample = np.ones(2 * self.number_of_customer, dtype=int)
 
                 # Set customer indices at even positions
                 sample[0::2] = permutation
-                sample[1::2] = np.random.choice([0, 1], size=sample[1::2].shape)
-                # sample[1::2] = 1
+
+                # Set all 0s in sample[1::2] for leftover samples
+                sample[1::2] = [0] * sample[1::2].shape[0]
+
+                # Ensure the last element is 1
                 sample[-1] = 1
 
                 # Add the generated sample to the list
