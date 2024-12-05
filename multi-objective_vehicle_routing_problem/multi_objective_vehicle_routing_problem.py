@@ -1,6 +1,7 @@
 from pymoo.operators.sampling.rnd import Sampling
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.core.crossover import Crossover
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.optimize import minimize
@@ -632,6 +633,12 @@ class CustomRandomSampling(Sampling):
             return X
 
 
+class EdgeExchangeCrossover(Crossover):
+
+    def __init__(self, **kwargs):
+        super().__init__(n_parents=2, n_offsprings=2, **kwargs)
+        # TODO
+
 class Helper:
     """
     All form of solution (routes)
@@ -648,7 +655,7 @@ class Helper:
         pass
 
     @staticmethod
-    def transform_encoded_to_decoded(encoded_routes: List[int]) -> List[List[int]]:
+    def transform_encoded_to_decoded(encoded_routes: List[int]):
         """
         Transform encoded routes to decoded routes.
 
@@ -751,6 +758,30 @@ class Helper:
                     flatted_routes.append({0, next_customer})
 
         return flatted_routes
+
+    @staticmethod
+    def transform_encoded_to_adjacent(encoded_route: List[int]) -> List[List[int]]:
+        """
+        Transform encoded routes to flatted routes
+
+        Args:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+
+        Returns:
+            flatted_routes (List[set[int, int]]): [[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]]
+        """
+        encoded_route = copy.deepcopy(encoded_route)[0::2]
+        return [
+            [
+                encoded_route[i],
+                (
+                    encoded_route[i + 1]
+                    if i + 1 < len(encoded_route)
+                    else encoded_route[0]
+                ),
+            ]
+            for i in range(len(encoded_route))
+        ]
 
     @staticmethod
     def calculate_x_lower_bound(number_of_customer: int) -> np.array:
