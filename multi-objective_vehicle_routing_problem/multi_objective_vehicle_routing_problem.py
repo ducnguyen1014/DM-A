@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import random
 import copy
 from itertools import product
+from collections import Counter
 
 # PARAMETERS ======================================================
 
@@ -633,12 +634,6 @@ class CustomRandomSampling(Sampling):
             return X
 
 
-class EdgeExchangeCrossover(Crossover):
-
-    def __init__(self, **kwargs):
-        super().__init__(n_parents=2, n_offsprings=2, **kwargs)
-        # TODO
-
 class Helper:
     """
     All form of solution (routes)
@@ -760,28 +755,61 @@ class Helper:
         return flatted_routes
 
     @staticmethod
-    def transform_encoded_to_adjacent(encoded_route: List[int]) -> List[List[int]]:
+    def transform_encoded_to_adjacent(
+        encoded_route: List[int],
+    ) -> Tuple[List[List[int]]]:
         """
-        Transform encoded routes to flatted routes
+        Transform encoded routes to adjacent routes
 
         Args:
             encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
 
         Returns:
-            flatted_routes (List[set[int, int]]): [[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]]
+            adjacent_routes (Tuple[List[List[int]]]): ([[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]], [0, 1, 0, 1, 1])
         """
-        encoded_route = copy.deepcopy(encoded_route)[0::2]
-        return [
+        encoded_route = copy.deepcopy(encoded_route)
+        customers = encoded_route[0::2]
+        flags = encoded_route[1::2]
+        return (
             [
-                encoded_route[i],
-                (
-                    encoded_route[i + 1]
-                    if i + 1 < len(encoded_route)
-                    else encoded_route[0]
-                ),
-            ]
-            for i in range(len(encoded_route))
-        ]
+                [
+                    customers[i],
+                    (customers[i + 1] if i + 1 < len(customers) else customers[0]),
+                ]
+                for i in range(len(customers))
+            ],
+            flags,
+        )
+
+    @staticmethod
+    def transform_adjacent_to_encoded(
+        adjacent_routes: List[List[int]], flags: List[int] = None
+    ) -> List[int]:
+        """
+        Transform adjacent routes back to encoded routes.
+
+        Args:
+            adjacent_routes (List[List[int]]): [[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]]
+            flags (List[int]) (optional): [0, 1, 0, 1, 1]
+
+        Returns:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+        """
+        encoded_route = [0] * len(adjacent_routes) * 2
+        customers = []
+        for i, (start, end) in enumerate(adjacent_routes):
+            customers.append(start)
+
+        encoded_route[0::2] = customers
+        if flags:
+            if len(flags) != len(customers):
+                raise ValueError(
+                    f"Invalid number of flags: must be {len(customers)}, got {len(flags)}."
+                )
+
+            encoded_route[1::2] = flags
+
+        return encoded_route
 
     @staticmethod
     def calculate_x_lower_bound(number_of_customer: int) -> np.array:
@@ -932,6 +960,129 @@ class Helper:
                 max_similarity,
             ]
         )
+
+
+class EdgeExchangeCrossover(Crossover, Helper):
+
+    def __init__(self, **kwargs):
+        super().__init__(n_parents=2, n_offsprings=2, **kwargs)
+
+    @staticmethod
+    def is_valid_adjacent_route(adjacent_route: List[List[int]]):
+        if not adjacent_route:
+            return False  # Empty list is not valid
+
+        # Check if the tail of the previous element matches the head of the next element
+        for i in range(len(adjacent_route) - 1):
+            if adjacent_route[i][1] != adjacent_route[i + 1][0]:
+                return False
+
+        # Check if the head of the first element matches the tail of the last element
+        if adjacent_route[0][0] != adjacent_route[-1][1]:
+            return False
+
+        counts = Counter(num for sublist in adjacent_route for num in sublist)
+
+        # Ensure each number appears at most twice
+        if any(count > 2 for count in counts.values()):
+            return False
+
+        return True
+
+    @staticmethod
+    def reverse_and_swap(lst, a, b):
+        """
+        Reverse and swap all elements in a list between indices a and b (exclusive),
+        treating the list as cyclic and keeping the list length unchanged.
+
+        Args:
+            lst (list): A list of continuous pairs (e.g., [[1, 2], [2, 3], [3, 4]...]).
+            a (int): Start index (exclusive).
+            b (int): End index (exclusive).
+
+        Returns:
+            list: The modified list.
+        """
+        if not isinstance(lst, list) or len(lst) < 0:
+            raise ValueError(f"lst ({lst}) must be a list.")
+
+        for idx, var in zip(("a", "b"), (a, b)):
+            if var < 0 or var >= len(lst):
+                raise ValueError(f"{idx} ({var}) is invalid.")
+
+        if a == b:
+            raise ValueError(f"a ({a}) and b ({b}) must be different.")
+
+        lst = copy.deepcopy(lst)
+
+        # Interal reverse and swap
+        if a < b:
+            sublist = lst[a + 1 : b]
+            reversed_sublist = [[item[1], item[0]] for item in sublist]
+            reversed_sublist.reverse()
+            lst[a + 1 : b] = reversed_sublist
+
+        # External reverse and swap
+        else:
+            first_part_length = len(lst) - (a + 1)
+
+            sublist = lst[a + 1 :]
+            sublist.extend(lst[:b])
+            reversed_sublist = [[item[1], item[0]] for item in sublist]
+            reversed_sublist.reverse()
+
+            lst[a + 1 :] = reversed_sublist[:first_part_length]
+            lst[:b] = reversed_sublist[first_part_length:]
+
+        return lst
+
+    @staticmethod
+    def swap_elements(list1, index1, list2, index2):
+        """
+        Swap elements between two lists at the specified indices.
+
+        Parameters:
+        - list1: First list
+        - list2: Second list
+        - index1: Index of the element in list1 to swap
+        - index2: Index of the element in list2 to swap
+        """
+        # Swap elements
+        list1[index1], list2[index2] = list2[index2], list1[index1]
+
+    @staticmethod
+    def edge_exchange_crossover(
+        adjacent_route_1: List[List[int]], adjacent_route_2: List[List[int]]
+    ):
+        random_index = random.randint(0, len(adjacent_route_1))
+
+    def _do(self, problem, X, **kwargs):
+        _, n_matings, _ = X.shape
+
+        for index in range(n_matings):
+            parent_1 = copy.deepcopy(X[0][index])
+            parent_2 = copy.deepcopy(X[1][index])
+
+            # Avoid duplicates
+            while np.array_equal(parent_1, parent_2) and index < n_matings - 1:
+                index += 1
+                parent_2 = copy.deepcopy(X[1][index])
+
+            # Crossover
+            adjacent_form_parent_1, flag_parent_1 = self.transform_encoded_to_adjacent(
+                parent_1
+            )
+            adjacent_form_parent_2, flag_parent_2 = self.transform_encoded_to_adjacent(
+                parent_2
+            )
+
+            offspring_1, offspring_2 = self.edge_exchange_crossover(
+                adjacent_form_parent_1, adjacent_form_parent_2
+            )
+
+
+class EXX(EdgeExchangeCrossover):
+    pass
 
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
@@ -1538,10 +1689,11 @@ def main():
     # ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
-        pop_size=2000,
-        n_offsprings=20,
+        pop_size=5,
+        n_offsprings=10,
         sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
-        crossover=SBX(prob=0.9, eta=15),
+        # crossover=SBX(prob=0.9, eta=15),
+        crossover=EXX(),
         mutation=PM(eta=20),
         eliminate_duplicates=True,
     )
