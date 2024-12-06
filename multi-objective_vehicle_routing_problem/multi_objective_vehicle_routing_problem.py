@@ -56,10 +56,10 @@ SEED = 30
 random.seed(SEED)
 np.random.seed(SEED)
 
-ENABLE_IND_HDP_PROBLEM = True
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
-ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = True
+ENABLE_IND_HDP_PROBLEM = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = False
 
 # Plot settings
 ENABLE_COORDINATES = True
@@ -768,7 +768,7 @@ class Helper:
             adjacent_routes (Tuple[List[List[int]]]): ([[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]], [0, 1, 0, 1, 1])
         """
         encoded_route = copy.deepcopy(encoded_route)
-        customers = encoded_route[0::2]
+        customers = np.argsort(encoded_route[0::2]) + 1
         flags = encoded_route[1::2]
         return (
             [
@@ -801,13 +801,15 @@ class Helper:
             customers.append(start)
 
         encoded_route[0::2] = customers
-        if flags:
+        if isinstance(flags, np.ndarray) and flags.size > 0:
             if len(flags) != len(customers):
                 raise ValueError(
                     f"Invalid number of flags: must be {len(customers)}, got {len(flags)}."
                 )
 
             encoded_route[1::2] = flags
+
+        encoded_route = [int(x) for x in encoded_route]
 
         return encoded_route
 
@@ -1052,21 +1054,111 @@ class EdgeExchangeCrossover(Crossover, Helper):
 
     @staticmethod
     def edge_exchange_crossover(
-        adjacent_route_1: List[List[int]], adjacent_route_2: List[List[int]]
+        initial_adjacent_route_1: List[List[int]],
+        initial_adjacent_route_2: List[List[int]],
     ):
-        random_index = random.randint(0, len(adjacent_route_1))
+        if not EdgeExchangeCrossover.is_valid_adjacent_route(initial_adjacent_route_1):
+            raise ValueError(
+                f"Invalid initial_adjacent_route_1 {initial_adjacent_route_1}."
+            )
+
+        if not EdgeExchangeCrossover.is_valid_adjacent_route(initial_adjacent_route_2):
+            raise ValueError(
+                f"Invalid initial_adjacent_route_2 {initial_adjacent_route_2}."
+            )
+
+        adjacent_route_1 = copy.deepcopy(initial_adjacent_route_1)
+        adjacent_route_2 = copy.deepcopy(initial_adjacent_route_2)
+
+        i1_index = random.randint(0, len(adjacent_route_1) - 1)
+        i1 = adjacent_route_1[i1_index]
+
+        # Finding i2 (same head as i1)
+        i2_index = next(
+            (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[0]), None
+        )
+        i2 = adjacent_route_2[i2_index]
+
+        exist_list = [False] * len(initial_adjacent_route_1)
+        while np.array_equal(i1, i2):
+            i1_index = random.randint(0, len(adjacent_route_1) - 1)
+            exist_list[i1_index] = True
+
+            i1 = adjacent_route_1[i1_index]
+
+            # Finding i2 (same head as i1)
+            i2_index = next(
+                (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[0]),
+                None,
+            )
+            i2 = adjacent_route_2[i2_index]
+
+            # In case all pairs of initial_adjacent_route_1 and initial_adjacent_route_2 are the same, return both
+            if all(exist_list):
+                return initial_adjacent_route_1, initial_adjacent_route_2
+
+        # Finding j2 (same tail as i1)
+        j2_index = next(
+            (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[1]),
+            None,
+        )
+
+        # Finding j1 (same head as j1)
+        j1_index = next(
+            (adjacent_route_1.index(x) for x in adjacent_route_1 if x[0] == i2[1]), None
+        )
+
+        while True:
+            i1 = adjacent_route_1[i1_index]
+            i2 = adjacent_route_2[i2_index]
+
+            # Finding j2 (same tail as i1)
+            j2_index = next(
+                (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[1]),
+                None,
+            )
+
+            # Finding j1 (same head as j1)
+            j1_index = next(
+                (adjacent_route_1.index(x) for x in adjacent_route_1 if x[0] == i2[1]),
+                None,
+            )
+
+            # Swap i1 and i2
+            EdgeExchangeCrossover.swap_elements(
+                adjacent_route_1, i1_index, adjacent_route_2, i2_index
+            )
+
+            adjacent_route_1 = EdgeExchangeCrossover.reverse_and_swap(
+                adjacent_route_1, i1_index, j1_index
+            )
+            adjacent_route_2 = EdgeExchangeCrossover.reverse_and_swap(
+                adjacent_route_2, i2_index, j2_index
+            )
+
+            if EdgeExchangeCrossover.is_valid_adjacent_route(
+                adjacent_route_1
+            ) and EdgeExchangeCrossover.is_valid_adjacent_route(adjacent_route_2):
+                break
+
+            i1_index = j1_index
+            i2_index = j2_index
+
+        return adjacent_route_1, adjacent_route_2
 
     def _do(self, problem, X, **kwargs):
         _, n_matings, _ = X.shape
 
+        Q = [[], []]
+
         for index in range(n_matings):
-            parent_1 = copy.deepcopy(X[0][index])
-            parent_2 = copy.deepcopy(X[1][index])
+            parent_1 = X[0][index]
+            parent_2 = X[1][index]
 
             # Avoid duplicates
-            while np.array_equal(parent_1, parent_2) and index < n_matings - 1:
-                index += 1
-                parent_2 = copy.deepcopy(X[1][index])
+            while np.array_equal(parent_1, parent_2):
+                index = random.randint(0, n_matings - 1)
+                parent_2 = X[1][index]
 
             # Crossover
             adjacent_form_parent_1, flag_parent_1 = self.transform_encoded_to_adjacent(
@@ -1079,6 +1171,13 @@ class EdgeExchangeCrossover(Crossover, Helper):
             offspring_1, offspring_2 = self.edge_exchange_crossover(
                 adjacent_form_parent_1, adjacent_form_parent_2
             )
+
+            Q[0].append(self.transform_adjacent_to_encoded(offspring_1, flag_parent_1))
+            Q[1].append(self.transform_adjacent_to_encoded(offspring_2, flag_parent_2))
+
+        Q = np.array(Q)
+
+        return Q
 
 
 class EXX(EdgeExchangeCrossover):
