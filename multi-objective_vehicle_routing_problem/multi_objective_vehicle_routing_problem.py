@@ -1211,7 +1211,7 @@ class OrderSplitMutation(Mutation):
             ]
         ]
         sublist_to_reverse: List = sublist[0::2]
-        sublist_to_reverse.reverse()
+        sublist_to_reverse = sublist_to_reverse[::-1]
         sublist[0::2] = sublist_to_reverse
 
         x[
@@ -1224,7 +1224,19 @@ class OrderSplitMutation(Mutation):
 
     @staticmethod
     def split_mutation(x):
-        pass
+        # Last flag always is 1
+        number_of_truck_can_be_shuffle = sum(x[1::2]) - 1
+
+        x[1::2][:-1] = 0
+
+        ones_indices = random.sample(
+            range(len(x[1::2][:-1])), number_of_truck_can_be_shuffle
+        )
+
+        for index in ones_indices:
+            x[1::2][:-1][index] = 1
+
+        return x
 
     def _do(self, problem, X, params=None, **kwargs):
         Xp = []
@@ -1233,6 +1245,8 @@ class OrderSplitMutation(Mutation):
             x = self.split_mutation(x)
 
             Xp.append(x)
+
+        Xp = np.array(Xp)
 
         return Xp
 
