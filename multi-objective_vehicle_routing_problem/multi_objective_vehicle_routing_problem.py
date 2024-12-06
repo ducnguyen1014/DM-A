@@ -4,6 +4,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.crossover import Crossover
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
+from pymoo.core.mutation import Mutation
 from pymoo.optimize import minimize
 from pymoo.core.result import Result
 
@@ -1184,6 +1185,62 @@ class EXX(EdgeExchangeCrossover):
     pass
 
 
+class OrderSplitMutation(Mutation):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @staticmethod
+    def order_mutation(x):
+        total_truck = sum(x[1::2])
+
+        if total_truck == 0:
+            raise ValueError(f"Total truck ({total_truck}) must greater than zero.")
+
+        chosed_truck = random.randint(1, total_truck) - 1
+
+        sublist_start_indices = [0]
+
+        for index in range(len(x[1::2])):
+            if x[1::2][index] == 1:
+                sublist_start_indices.append((index + 1) * 2)
+
+        sublist = x[
+            sublist_start_indices[chosed_truck] : sublist_start_indices[
+                chosed_truck + 1
+            ]
+        ]
+        sublist_to_reverse: List = sublist[0::2]
+        sublist_to_reverse.reverse()
+        sublist[0::2] = sublist_to_reverse
+
+        x[
+            sublist_start_indices[chosed_truck] : sublist_start_indices[
+                chosed_truck + 1
+            ]
+        ] = sublist
+
+        return x
+
+    @staticmethod
+    def split_mutation(x):
+        pass
+
+    def _do(self, problem, X, params=None, **kwargs):
+        Xp = []
+        for x in X:
+            x = self.order_mutation(x)
+            x = self.split_mutation(x)
+
+            Xp.append(x)
+
+        return Xp
+
+
+class OSMutation(OrderSplitMutation):
+    pass
+
+
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
     def __init__(
         self,
@@ -1788,12 +1845,13 @@ def main():
     # ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
-        pop_size=5,
+        pop_size=30,
         n_offsprings=10,
         sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
         # crossover=SBX(prob=0.9, eta=15),
         crossover=EXX(),
-        mutation=PM(eta=20),
+        # mutation=PM(eta=20),
+        mutation=OSMutation(),
         eliminate_duplicates=True,
     )
 
