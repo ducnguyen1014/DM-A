@@ -1252,7 +1252,7 @@ class OrderSplitMutation(Mutation):
         return Xp
 
 
-class OSMutation(OrderSplitMutation):
+class OSM(OrderSplitMutation):
     pass
 
 
@@ -1866,7 +1866,7 @@ def main():
         # crossover=SBX(prob=0.9, eta=15),
         crossover=EXX(),
         # mutation=PM(eta=20),
-        mutation=OSMutation(),
+        mutation=OSM(),
         eliminate_duplicates=True,
     )
 
