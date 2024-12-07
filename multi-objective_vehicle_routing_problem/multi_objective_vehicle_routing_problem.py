@@ -1189,6 +1189,7 @@ class OrderSplitMutation(Mutation):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.count = 1
 
     @staticmethod
     def order_mutation(x):
@@ -1241,9 +1242,9 @@ class OrderSplitMutation(Mutation):
     def _do(self, problem, X, params=None, **kwargs):
         Xp = []
         for x in X:
+            x[-1] = 1
             x = self.order_mutation(x)
             x = self.split_mutation(x)
-
             Xp.append(x)
 
         Xp = np.array(Xp)
