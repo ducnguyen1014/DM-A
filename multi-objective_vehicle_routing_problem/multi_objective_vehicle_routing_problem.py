@@ -1,8 +1,10 @@
 from pymoo.operators.sampling.rnd import Sampling
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.core.crossover import Crossover
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
+from pymoo.core.mutation import Mutation
 from pymoo.optimize import minimize
 from pymoo.core.result import Result
 
@@ -11,6 +13,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 import copy
+from itertools import product
+from collections import Counter
 
 # PARAMETERS ======================================================
 
@@ -53,10 +57,10 @@ SEED = 30
 random.seed(SEED)
 np.random.seed(SEED)
 
-ENABLE_IND_HDP_PROBLEM = True
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = True
-ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = True
-ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = True
+ENABLE_IND_HDP_PROBLEM = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_3OBJECTIVE = False
+ENABLE_DEP_HDP_PROBLEM_2OBJECTIVE_MEMETIC = False
 
 # Plot settings
 ENABLE_COORDINATES = True
@@ -506,6 +510,33 @@ class CustomRandomSampling(Sampling):
             result.extend([item, 0])
         return result
 
+    def generate_permutations_with_last_flag_one(self, input_list):
+        # Extract all odd indices to determine the flag positions
+        flag_indices = [i for i in range(len(input_list)) if i % 2 == 1]
+
+        # Ensure the last flag is always 1
+        flag_indices_except_last = flag_indices[:-1]
+        last_flag_index = flag_indices[-1]
+
+        # Generate all possible permutations for the other flag values (0 or 1)
+        all_permutations = product([0, 1], repeat=len(flag_indices_except_last))
+
+        # Generate lists based on the permutations
+        result = []
+        for perm in all_permutations:
+            new_list = input_list[:]  # Make a copy of the original list
+            for index, flag_value in zip(flag_indices_except_last, perm):
+                new_list[index] = flag_value
+            # Set the last flag to 1
+            new_list[last_flag_index] = 1
+            result.append(new_list)
+
+        # Ensure the given list is included
+        if input_list not in result:
+            result.append(input_list)
+
+        return result
+
     def _do(self, problem, n_samples, **kwargs):
         # Case 1: If this is HDP problem and it has NDP solutions, then use those solutions.
         if (
@@ -536,29 +567,66 @@ class CustomRandomSampling(Sampling):
                     initial_ndp_encoded_solutions[index], new_array
                 )
 
-                # Ensure the last flag is 1
-                new_sample[-1] = 1
-
-                transformed_initial_ndp_encoded_solutions.append(new_sample)
+                transformed_initial_ndp_encoded_solutions.extend(
+                    self.generate_permutations_with_last_flag_one(new_sample)
+                )
 
             return transformed_initial_ndp_encoded_solutions
 
         # Case 2: The following code is for NDP problem and HDP problem that does not has NDP solutions
         else:
             X = []  # Start with an empty list to hold samples
+            part_size = (
+                n_samples // self.number_of_customer
+            )  # Calculate size of each part
 
-            # Generate random permutations for each sample
-            for _ in range(n_samples):
+            for i in range(self.number_of_customer):
+                # Determine how many `1`s to place in sample[1::2] for this part
+                num_ones = i
+
+                for _ in range(part_size):
+                    # Create a random permutation of customer indices
+                    permutation = np.random.permutation(self.number_of_customer) + 1
+
+                    # Initialize the sample array
+                    sample = np.ones(2 * self.number_of_customer, dtype=int)
+
+                    # Set customer indices at even positions
+                    sample[0::2] = permutation
+
+                    # Generate a list with `num_ones` 1s and the rest 0s
+                    binary_choices = [1] * num_ones + [0] * (
+                        sample[1::2].shape[0] - num_ones
+                    )
+
+                    # Randomly shuffle the binary choices
+                    np.random.shuffle(binary_choices)
+
+                    # Set the binary choices in sample[1::2]
+                    sample[1::2] = binary_choices
+
+                    # Ensure the last element is 1
+                    sample[-1] = 1
+
+                    # Add the generated sample to the list
+                    X.append(sample)
+
+            # Handle any leftover samples due to rounding
+            remaining_samples = n_samples % self.number_of_customer
+            for _ in range(remaining_samples):
                 # Create a random permutation of customer indices
                 permutation = np.random.permutation(self.number_of_customer) + 1
 
-                # Insert zero after each element in the permutation
+                # Initialize the sample array
                 sample = np.ones(2 * self.number_of_customer, dtype=int)
 
                 # Set customer indices at even positions
                 sample[0::2] = permutation
-                sample[1::2] = np.random.choice([0, 1], size=sample[1::2].shape)
-                # sample[1::2] = 1
+
+                # Set all 0s in sample[1::2] for leftover samples
+                sample[1::2] = [0] * sample[1::2].shape[0]
+
+                # Ensure the last element is 1
                 sample[-1] = 1
 
                 # Add the generated sample to the list
@@ -583,7 +651,7 @@ class Helper:
         pass
 
     @staticmethod
-    def transform_encoded_to_decoded(encoded_routes: List[int]) -> List[List[int]]:
+    def transform_encoded_to_decoded(encoded_routes: List[int]):
         """
         Transform encoded routes to decoded routes.
 
@@ -686,6 +754,65 @@ class Helper:
                     flatted_routes.append({0, next_customer})
 
         return flatted_routes
+
+    @staticmethod
+    def transform_encoded_to_adjacent(
+        encoded_route: List[int],
+    ) -> Tuple[List[List[int]]]:
+        """
+        Transform encoded routes to adjacent routes
+
+        Args:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+
+        Returns:
+            adjacent_routes (Tuple[List[List[int]]]): ([[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]], [0, 1, 0, 1, 1])
+        """
+        encoded_route = copy.deepcopy(encoded_route)
+        customers = np.argsort(encoded_route[0::2]) + 1
+        flags = encoded_route[1::2]
+        return (
+            [
+                [
+                    customers[i],
+                    (customers[i + 1] if i + 1 < len(customers) else customers[0]),
+                ]
+                for i in range(len(customers))
+            ],
+            flags,
+        )
+
+    @staticmethod
+    def transform_adjacent_to_encoded(
+        adjacent_routes: List[List[int]], flags: List[int] = None
+    ) -> List[int]:
+        """
+        Transform adjacent routes back to encoded routes.
+
+        Args:
+            adjacent_routes (List[List[int]]): [[3, 1], [1, 5], [5, 4], [4, 2], [2, 3]]
+            flags (List[int]) (optional): [0, 1, 0, 1, 1]
+
+        Returns:
+            encoded_routes (List[int]): [3, 0, 1, 1, 5, 0, 4, 1, 2, 1]
+        """
+        encoded_route = [0] * len(adjacent_routes) * 2
+        customers = []
+        for i, (start, end) in enumerate(adjacent_routes):
+            customers.append(start)
+
+        encoded_route[0::2] = customers
+        if isinstance(flags, np.ndarray) and flags.size > 0:
+            if len(flags) != len(customers):
+                raise ValueError(
+                    f"Invalid number of flags: must be {len(customers)}, got {len(flags)}."
+                )
+
+            encoded_route[1::2] = flags
+
+        encoded_route = [int(x) for x in encoded_route]
+
+        return encoded_route
 
     @staticmethod
     def calculate_x_lower_bound(number_of_customer: int) -> np.array:
@@ -868,6 +995,297 @@ class Helper:
                 max_similarity,
             ]
         )
+
+
+class EdgeExchangeCrossover(Crossover, Helper):
+
+    def __init__(self, **kwargs):
+        super().__init__(n_parents=2, n_offsprings=2, **kwargs)
+
+    @staticmethod
+    def is_valid_adjacent_route(adjacent_route: List[List[int]]):
+        if not adjacent_route:
+            return False  # Empty list is not valid
+
+        # Check if the tail of the previous element matches the head of the next element
+        for i in range(len(adjacent_route) - 1):
+            if adjacent_route[i][1] != adjacent_route[i + 1][0]:
+                return False
+
+        # Check if the head of the first element matches the tail of the last element
+        if adjacent_route[0][0] != adjacent_route[-1][1]:
+            return False
+
+        counts = Counter(num for sublist in adjacent_route for num in sublist)
+
+        # Ensure each number appears at most twice
+        if any(count > 2 for count in counts.values()):
+            return False
+
+        return True
+
+    @staticmethod
+    def reverse_and_swap(lst, a, b):
+        """
+        Reverse and swap all elements in a list between indices a and b (exclusive),
+        treating the list as cyclic and keeping the list length unchanged.
+
+        Args:
+            lst (list): A list of continuous pairs (e.g., [[1, 2], [2, 3], [3, 4]...]).
+            a (int): Start index (exclusive).
+            b (int): End index (exclusive).
+
+        Returns:
+            list: The modified list.
+        """
+        if not isinstance(lst, list) or len(lst) < 0:
+            raise ValueError(f"lst ({lst}) must be a list.")
+
+        for idx, var in zip(("a", "b"), (a, b)):
+            if var < 0 or var >= len(lst):
+                raise ValueError(f"{idx} ({var}) is invalid.")
+
+        if a == b:
+            raise ValueError(f"a ({a}) and b ({b}) must be different.")
+
+        lst = copy.deepcopy(lst)
+
+        # Interal reverse and swap
+        if a < b:
+            sublist = lst[a + 1 : b]
+            reversed_sublist = [[item[1], item[0]] for item in sublist]
+            reversed_sublist.reverse()
+            lst[a + 1 : b] = reversed_sublist
+
+        # External reverse and swap
+        else:
+            first_part_length = len(lst) - (a + 1)
+
+            sublist = lst[a + 1 :]
+            sublist.extend(lst[:b])
+            reversed_sublist = [[item[1], item[0]] for item in sublist]
+            reversed_sublist.reverse()
+
+            lst[a + 1 :] = reversed_sublist[:first_part_length]
+            lst[:b] = reversed_sublist[first_part_length:]
+
+        return lst
+
+    @staticmethod
+    def swap_elements(list1, index1, list2, index2):
+        """
+        Swap elements between two lists at the specified indices.
+
+        Parameters:
+        - list1: First list
+        - list2: Second list
+        - index1: Index of the element in list1 to swap
+        - index2: Index of the element in list2 to swap
+        """
+        # Swap elements
+        list1[index1], list2[index2] = list2[index2], list1[index1]
+
+    @staticmethod
+    def edge_exchange_crossover(
+        initial_adjacent_route_1: List[List[int]],
+        initial_adjacent_route_2: List[List[int]],
+    ):
+        if not EdgeExchangeCrossover.is_valid_adjacent_route(initial_adjacent_route_1):
+            raise ValueError(
+                f"Invalid initial_adjacent_route_1 {initial_adjacent_route_1}."
+            )
+
+        if not EdgeExchangeCrossover.is_valid_adjacent_route(initial_adjacent_route_2):
+            raise ValueError(
+                f"Invalid initial_adjacent_route_2 {initial_adjacent_route_2}."
+            )
+
+        adjacent_route_1 = copy.deepcopy(initial_adjacent_route_1)
+        adjacent_route_2 = copy.deepcopy(initial_adjacent_route_2)
+
+        i1_index = random.randint(0, len(adjacent_route_1) - 1)
+        i1 = adjacent_route_1[i1_index]
+
+        # Finding i2 (same head as i1)
+        i2_index = next(
+            (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[0]), None
+        )
+        i2 = adjacent_route_2[i2_index]
+
+        exist_list = [False] * len(initial_adjacent_route_1)
+        while np.array_equal(i1, i2):
+            i1_index = random.randint(0, len(adjacent_route_1) - 1)
+            exist_list[i1_index] = True
+
+            i1 = adjacent_route_1[i1_index]
+
+            # Finding i2 (same head as i1)
+            i2_index = next(
+                (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[0]),
+                None,
+            )
+            i2 = adjacent_route_2[i2_index]
+
+            # In case all pairs of initial_adjacent_route_1 and initial_adjacent_route_2 are the same, return both
+            if all(exist_list):
+                return initial_adjacent_route_1, initial_adjacent_route_2
+
+        # Finding j2 (same tail as i1)
+        j2_index = next(
+            (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[1]),
+            None,
+        )
+
+        # Finding j1 (same head as j1)
+        j1_index = next(
+            (adjacent_route_1.index(x) for x in adjacent_route_1 if x[0] == i2[1]), None
+        )
+
+        while True:
+            i1 = adjacent_route_1[i1_index]
+            i2 = adjacent_route_2[i2_index]
+
+            # Finding j2 (same tail as i1)
+            j2_index = next(
+                (adjacent_route_2.index(x) for x in adjacent_route_2 if x[0] == i1[1]),
+                None,
+            )
+
+            # Finding j1 (same head as j1)
+            j1_index = next(
+                (adjacent_route_1.index(x) for x in adjacent_route_1 if x[0] == i2[1]),
+                None,
+            )
+
+            # Swap i1 and i2
+            EdgeExchangeCrossover.swap_elements(
+                adjacent_route_1, i1_index, adjacent_route_2, i2_index
+            )
+
+            adjacent_route_1 = EdgeExchangeCrossover.reverse_and_swap(
+                adjacent_route_1, i1_index, j1_index
+            )
+            adjacent_route_2 = EdgeExchangeCrossover.reverse_and_swap(
+                adjacent_route_2, i2_index, j2_index
+            )
+
+            if EdgeExchangeCrossover.is_valid_adjacent_route(
+                adjacent_route_1
+            ) and EdgeExchangeCrossover.is_valid_adjacent_route(adjacent_route_2):
+                break
+
+            i1_index = j1_index
+            i2_index = j2_index
+
+        return adjacent_route_1, adjacent_route_2
+
+    def _do(self, problem, X, **kwargs):
+        _, n_matings, _ = X.shape
+
+        Q = [[], []]
+
+        for index in range(n_matings):
+            parent_1 = X[0][index]
+            parent_2 = X[1][index]
+
+            # Avoid duplicates
+            while np.array_equal(parent_1, parent_2):
+                index = random.randint(0, n_matings - 1)
+                parent_2 = X[1][index]
+
+            # Crossover
+            adjacent_form_parent_1, flag_parent_1 = self.transform_encoded_to_adjacent(
+                parent_1
+            )
+            adjacent_form_parent_2, flag_parent_2 = self.transform_encoded_to_adjacent(
+                parent_2
+            )
+
+            offspring_1, offspring_2 = self.edge_exchange_crossover(
+                adjacent_form_parent_1, adjacent_form_parent_2
+            )
+
+            Q[0].append(self.transform_adjacent_to_encoded(offspring_1, flag_parent_1))
+            Q[1].append(self.transform_adjacent_to_encoded(offspring_2, flag_parent_2))
+
+        Q = np.array(Q)
+
+        return Q
+
+
+class EXX(EdgeExchangeCrossover):
+    pass
+
+
+class OrderSplitMutation(Mutation):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.count = 1
+
+    @staticmethod
+    def order_mutation(x):
+        total_truck = sum(x[1::2])
+
+        if total_truck == 0:
+            raise ValueError(f"Total truck ({total_truck}) must greater than zero.")
+
+        chosed_truck = random.randint(1, total_truck) - 1
+
+        sublist_start_indices = [0]
+
+        for index in range(len(x[1::2])):
+            if x[1::2][index] == 1:
+                sublist_start_indices.append((index + 1) * 2)
+
+        sublist = x[
+            sublist_start_indices[chosed_truck] : sublist_start_indices[
+                chosed_truck + 1
+            ]
+        ]
+        sublist_to_reverse: List = sublist[0::2]
+        sublist_to_reverse = sublist_to_reverse[::-1]
+        sublist[0::2] = sublist_to_reverse
+
+        x[
+            sublist_start_indices[chosed_truck] : sublist_start_indices[
+                chosed_truck + 1
+            ]
+        ] = sublist
+
+        return x
+
+    @staticmethod
+    def split_mutation(x):
+        # Last flag always is 1
+        number_of_truck_can_be_shuffle = sum(x[1::2]) - 1
+
+        x[1::2][:-1] = 0
+
+        ones_indices = random.sample(
+            range(len(x[1::2][:-1])), number_of_truck_can_be_shuffle
+        )
+
+        for index in ones_indices:
+            x[1::2][:-1][index] = 1
+
+        return x
+
+    def _do(self, problem, X, params=None, **kwargs):
+        Xp = []
+        for x in X:
+            x[-1] = 1
+            x = self.order_mutation(x)
+            x = self.split_mutation(x)
+            Xp.append(x)
+
+        Xp = np.array(Xp)
+
+        return Xp
+
+
+class OSM(OrderSplitMutation):
+    pass
 
 
 class NDP_MultiObjectiveVehicleRoutingProblem(ElementwiseProblem, Helper):
@@ -1474,11 +1892,13 @@ def main():
     # ndp_problem.visualize()
 
     ndp_algorithm = NSGA2(
-        pop_size=2000,
-        n_offsprings=20,
+        pop_size=30,
+        n_offsprings=10,
         sampling=CustomRandomSampling(NUMBER_OF_NDP_CUSTOMER),
-        crossover=SBX(prob=0.9, eta=15),
-        mutation=PM(eta=20),
+        # crossover=SBX(prob=0.9, eta=15),
+        crossover=EXX(),
+        # mutation=PM(eta=20),
+        mutation=OSM(),
         eliminate_duplicates=True,
     )
 
